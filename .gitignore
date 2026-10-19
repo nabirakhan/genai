@@ -1,0 +1,11 @@
+*.docx
+data/
+outputs/
+checkpoints/
+*.pkl
+*.pt
+*.pth
+kaggle.json
+.env
+__pycache__/
+.ipynb_checkpoints/
