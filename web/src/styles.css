@@ -30,17 +30,21 @@ a:hover {
 /* nav */
 .nav {
   position: sticky;
-  top: 0;
+  top: 10px;
   z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px clamp(16px, 4vw, 40px);
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  width: min(880px, calc(100% - 32px));
+  margin: 10px auto 0;
+  padding: 7px 10px 7px 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
-  border-bottom: 1px solid var(--border);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 .nav__brand {
   display: inline-flex;
@@ -48,7 +52,7 @@ a:hover {
   gap: 10px;
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: 1.05rem;
   letter-spacing: 0.01em;
 }
 .nav__dot {
@@ -60,23 +64,28 @@ a:hover {
 }
 .nav__links {
   display: flex;
-  gap: clamp(14px, 3vw, 32px);
-  font-size: 0.92rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  gap: 4px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 .nav__links a {
   color: var(--text-muted);
+  padding: 6px 12px;
+  border-radius: 999px;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .nav__links a:hover {
   color: var(--text);
+  background: var(--surface);
 }
 
 /* hero */
 .hero {
   position: relative;
-  min-height: calc(100vh - 60px);
+  margin-top: -56px;
+  min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
   align-items: center;
