@@ -682,7 +682,7 @@ function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: n
   });
 
   return (
-    <group position={[offsetX, 0.05, 0]} scale={scale}>
+    <group position={[offsetX, -0.1, 0]} scale={scale}>
       <group ref={eye}>
         <mesh material={eyeMat}>
           <sphereGeometry args={[Z_EYE_R, 128, 128]} />

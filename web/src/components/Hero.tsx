@@ -11,7 +11,7 @@ export default function Hero() {
         </Suspense>
       </div>
       <div className="hero__copy">
-        <p className="eyebrow">AI4009 Generative AI · FAST-NUCES</p>
+        <p className="eyebrow">Art inspired by Shatter Me</p>
         <h1 className="hero__title">
           When does a <em>GAN</em> help?
         </h1>
