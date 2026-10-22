@@ -1,11 +1,31 @@
-*.docx
+# data, weights, caches (never commit)
 data/
 outputs/
 checkpoints/
 *.pkl
 *.pt
 *.pth
+*.npy
+*.npz
 kaggle.json
 .env
+.env.*
+
+# python
 __pycache__/
+*.pyc
+.venv/
+*.egg-info/
+.pytest_cache/
 .ipynb_checkpoints/
+
+# web
+web/node_modules/
+web/dist/
+web/.vercel/
+
+# docs sources kept local
+*.docx
+
+# stylegan3 build artefacts inside the submodule
+third_party/stylegan3/**/__pycache__/

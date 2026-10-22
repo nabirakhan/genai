@@ -1,0 +1,73 @@
+diff --git a/torch_utils/misc.py b/torch_utils/misc.py
+index 335397d..5e7508f 100644
+--- a/torch_utils/misc.py
++++ b/torch_utils/misc.py
+@@ -161,6 +161,36 @@ def copy_params_and_buffers(src_module, dst_module, require_all=False):
+         if name in src_tensors:
+             tensor.copy_(src_tensors[name].detach()).requires_grad_(tensor.requires_grad)
+ 
++@torch.no_grad()
++def copy_params_and_buffers_tolerant(src_module, dst_module, verbose=False):
++    """copy_params_and_buffers(require_all=False) that survives shape mismatches.
++
++    Exact-shape tensors are copied. 2-D weights with the same leading dim and a wider
++    destination get the overlapping column slice copied (mapping.fc0.weight when a class
++    embedding is appended to z). Everything else keeps its fresh initialisation.
++    Needed to fine-tune a conditional (--cond=1) network from an unconditional pickle.
++    """
++    assert isinstance(src_module, torch.nn.Module)
++    assert isinstance(dst_module, torch.nn.Module)
++    src_tensors = dict(named_params_and_buffers(src_module))
++    copied, partial, skipped, new = [], [], [], []
++    for name, tensor in named_params_and_buffers(dst_module):
++        if name not in src_tensors:
++            new.append(name)
++            continue
++        src = src_tensors[name].detach()
++        if src.shape == tensor.shape:
++            tensor.copy_(src)
++            copied.append(name)
++        elif src.ndim == 2 and tensor.ndim == 2 and src.shape[0] == tensor.shape[0] and src.shape[1] < tensor.shape[1]:
++            tensor[:, :src.shape[1]].copy_(src)
++            partial.append(f'{name} {list(src.shape)}->{list(tensor.shape)}')
++        else:
++            skipped.append(f'{name} {list(src.shape)}!={list(tensor.shape)}')
++    if verbose:
++        print(f'  copied {len(copied)} tensors; partial: {partial}; skipped: {skipped}; new: {new}')
++    return dict(copied=copied, partial=partial, skipped=skipped, new=new)
++
+ #----------------------------------------------------------------------------
+ # Context manager for easily enabling/disabling DistributedDataParallel
+ # synchronization.
+diff --git a/training/training_loop.py b/training/training_loop.py
+index ddd0c15..db07e54 100644
+--- a/training/training_loop.py
++++ b/training/training_loop.py
+@@ -159,7 +159,7 @@ def training_loop(
+         with dnnlib.util.open_url(resume_pkl) as f:
+             resume_data = legacy.load_network_pkl(f)
+         for name, module in [('G', G), ('D', D), ('G_ema', G_ema)]:
+-            misc.copy_params_and_buffers(resume_data[name], module, require_all=False)
++            misc.copy_params_and_buffers_tolerant(resume_data[name], module, verbose=True)
+ 
+     # Print network summary tables.
+     if rank == 0:
+@@ -179,6 +179,18 @@ def training_loop(
+         if ada_target is not None:
+             ada_stats = training_stats.Collector(regex='Loss/signs/real')
+ 
++    # Restore the ADA augmentation probability when resuming from one of our own snapshots
++    # (upstream only copies G/D/G_ema, so p would restart at 0 after every session break).
++    # Done on every rank because augment_pipe has no parameters and is not DDP-broadcast.
++    if (resume_pkl is not None) and (augment_pipe is not None):
++        with dnnlib.util.open_url(resume_pkl) as f:
++            _resume_aug = legacy.load_network_pkl(f).get('augment_pipe')
++        if _resume_aug is not None:
++            augment_pipe.p.copy_(_resume_aug.p.to(device))
++            if rank == 0:
++                print(f'Restored ADA p = {float(augment_pipe.p):.3f}')
++        del _resume_aug
++
+     # Distribute across GPUs.
+     if rank == 0:
+         print(f'Distributing across {num_gpus} GPUs...')

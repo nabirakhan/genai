@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+python-multipart
+timm
+grad-cam
+numpy
+pillow
+opencv-python-headless
+scikit-learn
+pandas
+scipy
+click
+requests
+huggingface_hub

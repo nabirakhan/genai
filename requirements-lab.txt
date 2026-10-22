@@ -1,0 +1,8 @@
+# Lab PC (RTX 4000 Ada) and any CUDA machine. Install torch first, then the project:
+#   uv venv .venv --python 3.11
+#   uv pip install --python .venv/Scripts/python.exe -r requirements-lab.txt
+#   uv pip install --python .venv/Scripts/python.exe -e ".[api,dev]"
+--index-url https://download.pytorch.org/whl/cu128
+--extra-index-url https://pypi.org/simple
+torch
+torchvision

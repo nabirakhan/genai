@@ -1,0 +1,741 @@
+import { Canvas, useFrame } from "@react-three/fiber";
+import { Sparkles } from "@react-three/drei";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
+
+/* Shatter-Me style eye. An almond aperture cut into a painted face plane, a large iridescent
+   eyeball behind it that follows the cursor. Every lash on both lids IS a branch: a gnarled
+   axis that keeps growing with side branches peeling off, forks, and twiggy clumps at the ends,
+   radiating outward from the lid line. Five big limbs rise from the upper lid. Leaves grow along
+   the twigs, with sparse crystals and a few flowers at the ends. A handful of crystallised tears
+   ooze from the outer lower lid. Blink = the aperture closes and the lashes bend. */
+
+const W = 1.25; // half width of the eye aperture (world units)
+const Z_EYE_R = 1.4;
+const Z_FACE = 1.55;
+const Z_LASH = 1.62;
+
+const upperLid = (x: number) => {
+  const nx = THREE.MathUtils.clamp(x / W, -1, 1);
+  const b = 1 - nx * nx;
+  return 0.5 * Math.pow(b, 0.75) + 0.12 * nx * b;
+};
+const lowerLid = (x: number) => {
+  const nx = THREE.MathUtils.clamp(x / W, -1, 1);
+  const b = 1 - nx * nx;
+  return -(0.34 * Math.pow(b, 1.1) - 0.05 * nx * b);
+};
+// outward normal of a lid curve, as an angle in the (sin a, cos a) convention (0 = straight up)
+const lidNormal = (lid: (x: number) => number, x: number, down: boolean) => {
+  const h = 0.01;
+  const dy = (lid(Math.min(W, x + h)) - lid(Math.max(-W, x - h))) / (2 * h);
+  return down ? Math.atan2(dy, -1) : Math.atan2(-dy, 1);
+};
+
+/* ---------- shaders ---------------------------------------------------------------------- */
+
+const NOISE = /* glsl */ `
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float hashp(vec2 i, float per) { i.x = mod(i.x, per); return hash(i); }
+float pnoise(vec2 p, float per) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hashp(i, per), hashp(i + vec2(1.0, 0.0), per), f.x),
+             mix(hashp(i + vec2(0.0, 1.0), per), hashp(i + vec2(1.0, 1.0), per), f.x), f.y);
+}
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int k = 0; k < 4; k++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
+`;
+
+const LID_GLSL = /* glsl */ `
+const float W = ${W.toFixed(3)};
+float upperLid(float x) { float nx = clamp(x / W, -1.0, 1.0); float b = 1.0 - nx * nx; return 0.5 * pow(b, 0.75) + 0.12 * nx * b; }
+float lowerLid(float x) { float nx = clamp(x / W, -1.0, 1.0); float b = 1.0 - nx * nx; return -(0.34 * pow(b, 1.1) - 0.05 * nx * b); }
+`;
+
+const EYE_VERT = /* glsl */ `
+varying vec3 vNormal;
+varying vec3 vPos;
+void main() {
+  vNormal = normalize(normalMatrix * normal);
+  vPos = position;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+const EYE_FRAG = /* glsl */ `
+uniform float uTime;
+uniform float uPupil;
+uniform vec3 uIrisA;
+uniform vec3 uIrisB;
+uniform vec3 uIrisC;
+varying vec3 vNormal;
+varying vec3 vPos;
+${NOISE}
+void main() {
+  vec3 p = normalize(vPos);
+  float ang = acos(clamp(p.z, -1.0, 1.0));
+  float t = atan(p.y, p.x) / 6.2831853 + 0.5;
+  float r = ang / 0.34;
+
+  vec3 sclera = vec3(0.96, 0.94, 0.95);
+  float vein = smoothstep(0.8, 1.0, pnoise(vec2(t * 11.0, ang * 16.0), 11.0));
+  sclera = mix(sclera, vec3(0.78, 0.3, 0.38), vein * 0.45 * smoothstep(0.45, 1.3, ang));
+  sclera *= 1.0 - 0.25 * smoothstep(0.6, 1.4, ang);
+
+  float fib = pnoise(vec2(t * 48.0, r * 5.0), 48.0) * 0.6 + pnoise(vec2(t * 140.0, r * 2.5 + uTime * 0.02), 140.0) * 0.4;
+  vec3 iris = mix(uIrisA, uIrisB, smoothstep(0.05, 0.95, r));
+  iris = mix(iris, uIrisC, fib * 0.8);
+  iris *= 0.45 + 0.9 * fib;
+  vec2 cell = vec2(t * 170.0, r * 46.0);
+  vec2 cf = fract(cell) - 0.5;
+  float fleck = step(0.975, hash(floor(cell))) * smoothstep(0.42, 0.1, length(cf)) * smoothstep(0.25, 0.9, r);
+  iris += vec3(1.0, 0.92, 0.97) * fleck * 0.8;
+  iris = mix(iris, vec3(0.08, 0.0, 0.06), smoothstep(0.82, 1.0, r));
+  float pupil = smoothstep(uPupil, uPupil + 0.07, r);
+  vec3 col = mix(vec3(0.0), iris, pupil);
+  col = mix(col, sclera, smoothstep(0.97, 1.06, r));
+
+  float diff = 0.5 + 0.5 * max(dot(normalize(vNormal), normalize(vec3(0.4, 0.8, 1.0))), 0.0);
+  gl_FragColor = vec4(col * diff, 1.0);
+}`;
+
+const FACE_VERT = /* glsl */ `
+varying vec2 vP;
+void main() {
+  vP = position.xy;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
+
+const FACE_FRAG = /* glsl */ `
+uniform float uOpen;
+uniform float uTime;
+varying vec2 vP;
+${NOISE}
+${LID_GLSL}
+void main() {
+  vec2 p = vP;
+  float up = upperLid(p.x) * uOpen;
+  float lo = lowerLid(p.x) * uOpen;
+  float edge = min(up - p.y, p.y - lo);
+  if (abs(p.x) > W) edge = -1.0;
+  float inside = smoothstep(-0.006, 0.006, edge);
+
+  float n = fbm(p * 1.4 + vec2(0.0, uTime * 0.012));
+  vec3 skin = mix(vec3(0.15, 0.035, 0.06), vec3(0.34, 0.1, 0.21), n);
+  skin = mix(skin, vec3(0.24, 0.0, 0.17), smoothstep(0.55, 0.9, fbm(p * 2.6 + 7.0)) * 0.55);
+  skin = mix(skin, vec3(0.42, 0.14, 0.28), smoothstep(0.6, 0.95, fbm(p * 2.1 - 3.0)) * 0.45);
+  vec2 g = floor(p * 150.0);
+  float h = hash(g);
+  float sp = step(0.99, h) * (0.5 + 0.5 * sin(uTime * 3.0 + h * 40.0));
+  float near = 1.0 - smoothstep(0.0, 0.9, -edge);
+  skin += sp * vec3(1.0, 0.78, 0.86) * (0.25 + 0.6 * near);
+
+  float liner = 1.0 - smoothstep(0.0, 0.1, -edge);
+  skin = mix(skin, vec3(0.02, 0.0, 0.015), liner * 0.92);
+  float crease = exp(-pow((p.y - (up + 0.24)) / 0.05, 2.0)) * step(abs(p.x), W * 1.05) * uOpen;
+  skin = mix(skin, vec3(0.04, 0.0, 0.03), crease * 0.5);
+
+  float rr = length(p * vec2(0.7, 1.0)) + (fbm(p * 1.8) - 0.5) * 0.7;
+  float faceA = 1.0 - smoothstep(1.05, 2.1, rr);
+
+  float shadow = (1.0 - smoothstep(0.0, 0.17, up - p.y)) * 0.62;
+  shadow += (1.0 - smoothstep(0.0, 0.06, p.y - lo)) * 0.25;
+
+  vec3 col = mix(skin, vec3(0.02, 0.0, 0.015), inside);
+  float a = mix(faceA, min(shadow, 0.8), inside);
+  gl_FragColor = vec4(col, a);
+}`;
+
+/* ---------- helpers ---------------------------------------------------------------------- */
+
+const pointer = { x: 0, y: 0 };
+const easeOut = (x: number) => 1 - Math.pow(1 - x, 3);
+const smooth = (x: number) => x * x * (3 - 2 * x);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+
+function useMedia(query: string) {
+  const [match, setMatch] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setMatch(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [query]);
+  return match;
+}
+
+function makeRng(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+/* ---------- growth system: every lash is a tree ----------------------------------------- */
+
+type Seg = { root: number; ox: number; oy: number; oz: number; a: number; len: number; th: number };
+type Crystal = { root: number; ox: number; oy: number; oz: number; sx: number; sy: number; rot: number; tilt: number; color: THREE.Color; spin: number };
+type Leaf = { root: number; ox: number; oy: number; oz: number; dir: number; len: number; width: number; curl: number; turn: number; phase: number; color: THREE.Color };
+type Flower = { root: number; ox: number; oy: number; oz: number; size: number; rot: number; n: number; layers: number; cup: number; tiltX: number; tiltY: number; color: THREE.Color; center: THREE.Color; spin: number };
+type Tear = { root: number; ox: number; oy: number; rx: number; ry: number; phase: number };
+type Root = { x: number; aOpen: number; aClosed: number; upper: boolean; follow: number; sway: number };
+type Forest = { roots: Root[]; segs: Seg[]; threads: Seg[]; tears: Tear[]; crystals: Crystal[]; leaves: Leaf[]; flowers: Flower[] };
+type Rng = () => number;
+type Style = {
+  curl: number;        // how gnarled each piece is
+  tropism: number;     // pull toward `lean` per piece
+  lean: number;        // direction the whole lash wants to grow toward
+  lateralProb: number; // chance of a side branch at each piece
+  spreadMin: number;
+  spreadVar: number;
+  forkProb: number;    // chance the axis splits in two instead of continuing
+  apical: number;      // length ratio of the continuing axis
+  lateral: number;     // length ratio of side branches
+  twigs: number;       // extra micro twigs at the ends
+  leafy: number;       // leaf density multiplier for this lash
+};
+
+const CRYSTAL_COLORS = ["#fff4f8", "#ffd1e0", "#f3b6ff", "#ffe9a8", "#ff9fc0"].map((c) => new THREE.Color(c));
+const FLOWER_COLORS = ["#ffb0c8", "#fff0f5", "#ff6fa0", "#d9a7ff", "#ffd9b0", "#ff8fb3"].map((c) => new THREE.Color(c));
+const CENTER_COLORS = ["#ffd36b", "#ffb347", "#fff1a8", "#ff7aa2"].map((c) => new THREE.Color(c));
+const LEAF_COLORS = ["#2e6b3b", "#5d7a2c", "#1f5c4c", "#3b7d5a", "#6a1f3a", "#8a2a3d", "#4a6b2a"].map((c) => new THREE.Color(c));
+
+function pick<T>(arr: T[], rand: Rng): T {
+  return arr[Math.floor(rand() * arr.length) % arr.length];
+}
+
+function addLeaf(f: Forest, root: number, cx: number, cy: number, ca: number, rand: Rng) {
+  const side = rand() < 0.5 ? 1 : -1;
+  const len = 0.025 + rand() * 0.045;
+  f.leaves.push({
+    root, ox: cx, oy: cy, oz: 0.02 + rand() * 0.04,
+    dir: ca + side * (0.5 + rand() * 0.9),
+    len, width: len * (0.35 + rand() * 0.35),
+    curl: (rand() - 0.5) * 0.9,
+    turn: (rand() - 0.5) * 1.4,
+    phase: rand() * Math.PI * 2,
+    color: pick(LEAF_COLORS, rand),
+  });
+}
+
+function decorateEnd(f: Forest, root: number, cx: number, cy: number, rand: Rng) {
+  const roll = rand();
+  if (roll < 0.03) {
+    const bud = rand() < 0.25;
+    const big = !bud && rand() < 0.4;
+    f.flowers.push({
+      root, ox: cx, oy: cy, oz: 0.04 + rand() * 0.03,
+      size: bud ? 0.009 + rand() * 0.006 : big ? 0.022 + rand() * 0.016 : 0.013 + rand() * 0.012,
+      rot: rand() * Math.PI * 2,
+      n: bud ? 4 : 5 + Math.floor(rand() * 4),
+      layers: big ? 2 : 1,
+      cup: bud ? 1.1 : 0.25 + rand() * 0.55,
+      tiltX: (rand() - 0.5) * 0.9,
+      tiltY: (rand() - 0.5) * 0.9,
+      color: pick(FLOWER_COLORS, rand),
+      center: pick(CENTER_COLORS, rand),
+      spin: (rand() - 0.5) * 0.25,
+    });
+  } else if (roll < 0.19) {
+    const kind = rand();
+    const base = 0.006 + rand() * 0.02;
+    const shard = kind < 0.45;
+    const cluster = kind > 0.85;
+    const count = cluster ? 2 + Math.floor(rand() * 2) : 1;
+    for (let i = 0; i < count; i++) {
+      f.crystals.push({
+        root, ox: cx + (i ? (rand() - 0.5) * 0.03 : 0), oy: cy + (i ? (rand() - 0.5) * 0.03 : 0), oz: 0.02 + rand() * 0.03,
+        sx: base * (shard ? 0.45 : 0.8 + rand() * 0.5) * (i ? 0.7 : 1),
+        sy: base * (shard ? 1.8 + rand() * 1.6 : 1 + rand() * 0.5) * (i ? 0.7 : 1),
+        rot: rand() * Math.PI * 2,
+        tilt: (rand() - 0.5) * 1.4,
+        color: pick(CRYSTAL_COLORS, rand),
+        spin: shard ? (rand() - 0.5) * 0.3 : (rand() - 0.5) * 1.2,
+      });
+    }
+  }
+}
+
+function growBranch(root: number, x: number, y: number, a: number, len: number, th: number, depth: number, st: Style,
+                    f: Forest, rand: Rng) {
+  const { segs } = f;
+  const pieces = 2 + Math.floor(rand() * 3);
+  let cx = x, cy = y, ca = a;
+  for (let k = 0; k < pieces; k++) {
+    ca += st.curl * (rand() - 0.5) * 2 + (st.lean - ca) * st.tropism;
+    const l = (len / pieces) * (0.7 + 0.6 * rand());
+    segs.push({ root, ox: cx, oy: cy, oz: (rand() - 0.5) * 0.08, a: ca, len: l * 1.08, th: Math.max(0.0025, th * (1 - 0.4 * (k / pieces))) });
+    cx += Math.sin(ca) * l;
+    cy += Math.cos(ca) * l;
+    const leafProb = (depth <= 1 ? 0.18 : depth === 2 ? 0.1 : 0.025) * st.leafy;
+    if (rand() < leafProb) addLeaf(f, root, cx, cy, ca, rand);
+    if (depth > 1 && k >= 1 && rand() < st.lateralProb) {
+      const side = rand() < 0.5 ? 1 : -1;
+      growBranch(root, cx, cy, ca + side * (st.spreadMin + rand() * st.spreadVar), len * st.lateral * (0.6 + 0.8 * rand()), th * 0.5, depth - 2, st, f, rand);
+    }
+  }
+  if (depth > 0) {
+    if (rand() < st.forkProb) {
+      const sp = st.spreadMin * 0.7 + rand() * st.spreadVar * 0.6;
+      const side = rand() < 0.5 ? 1 : -1;
+      growBranch(root, cx, cy, ca + side * sp, len * st.apical * (0.7 + 0.5 * rand()), th * 0.62, depth - 1, st, f, rand);
+      growBranch(root, cx, cy, ca - side * sp * (0.6 + 0.8 * rand()), len * st.apical * (0.5 + 0.6 * rand()), th * 0.55, depth - 2, st, f, rand);
+    } else {
+      growBranch(root, cx, cy, ca + (rand() - 0.5) * 0.35, len * st.apical * (0.8 + 0.4 * rand()), th * 0.68, depth - 1, st, f, rand);
+    }
+  }
+  if (depth <= 1) {
+    const n = 2 + Math.floor(rand() * st.twigs);
+    for (let i = 0; i < n; i++) {
+      const ta = ca + (rand() - 0.5) * 2.4;
+      segs.push({ root, ox: cx, oy: cy, oz: (rand() - 0.5) * 0.04, a: ta, len: 0.02 + rand() * 0.06, th: 0.0025 });
+    }
+    decorateEnd(f, root, cx, cy, rand);
+  }
+}
+
+// a crystallised tear: a bead at the lid line; most run down as a thin thread that swells into a
+// glassy teardrop, with a few small crystal facets on the bulb. Three kinds: bead, run, long ooze.
+function growTear(f: Forest, root: number, kind: 0 | 1 | 2, rand: Rng) {
+  // meniscus bead welling at the lid line
+  const bead = (kind === 0 ? 0.026 : 0.02) + rand() * 0.012;
+  f.tears.push({ root, ox: 0, oy: 0.02, rx: bead, ry: bead * (0.9 + rand() * 0.4), phase: rand() * 6.28 });
+  if (kind === 0) return;
+  const len = kind === 1 ? 0.12 + rand() * 0.2 : 0.35 + rand() * 0.45;
+  const th0 = 0.011 + rand() * 0.005;
+  const parts = kind === 1 ? 2 : 3 + Math.floor(rand() * 3);
+  let cx = 0, cy = 0, ca = Math.PI + (rand() - 0.5) * 0.08;
+  for (let k = 0; k < parts; k++) {
+    ca += (rand() - 0.5) * 0.06;
+    const l = (len / parts) * (0.8 + 0.4 * rand());
+    f.threads.push({ root, ox: cx, oy: cy, oz: 0.03, a: ca, len: l * 1.05, th: th0 * (1 + 0.6 * (k / parts)) });
+    cx += Math.sin(ca) * l;
+    cy += Math.cos(ca) * l;
+    if (kind === 2 && k === Math.floor(parts / 2) && rand() < 0.6) {
+      const mid = 0.012 + rand() * 0.007;
+      f.tears.push({ root, ox: cx, oy: cy, rx: mid, ry: mid * 1.7, phase: rand() * 6.28 });
+    }
+  }
+  const rx = kind === 1 ? 0.02 + rand() * 0.01 : 0.028 + rand() * 0.016;
+  f.tears.push({ root, ox: cx, oy: cy, rx, ry: rx * (1.5 + rand() * 0.6), phase: rand() * 6.28 });
+  const facets = 1 + Math.floor(rand() * 3);
+  for (let i = 0; i < facets; i++) {
+    f.crystals.push({ root, ox: cx + (rand() - 0.5) * rx * 1.4, oy: cy - rx * (0.8 + rand() * 1.4), oz: 0.05 + rand() * 0.02,
+                      sx: 0.006 + rand() * 0.007, sy: 0.016 + rand() * 0.022, rot: rand() * Math.PI * 2, tilt: (rand() - 0.5) * 1.2,
+                      color: pick(CRYSTAL_COLORS, rand), spin: (rand() - 0.5) * 0.5 });
+  }
+}
+
+function randomStyle(rand: Rng, lean: number): Style {
+  return {
+    curl: 0.12 + rand() * 0.3,
+    tropism: 0.03 + rand() * 0.12,
+    lean,
+    lateralProb: 0.35 + rand() * 0.45,
+    spreadMin: 0.3 + rand() * 0.2,
+    spreadVar: 0.4 + rand() * 0.35,
+    forkProb: 0.25 + rand() * 0.35,
+    apical: 0.65 + rand() * 0.2,
+    lateral: 0.4 + rand() * 0.25,
+    twigs: 2 + Math.floor(rand() * 3),
+    leafy: rand() < 0.3 ? 0 : rand() < 0.5 ? 0.6 : 1.4,
+  };
+}
+
+function buildForest(detail: number): Forest {
+  const f: Forest = { roots: [], segs: [], threads: [], tears: [], crystals: [], leaves: [], flowers: [] };
+  const roots = f.roots;
+  const rand = makeRng(4242);
+  const addRoot = (r: Root) => roots.push(r) - 1;
+
+  // the five big limbs of the upper lid: inner sweep, tallest, top, outer, outer sweep
+  const giants: [number, number][] = [[-0.9, 0.8], [-0.45, 1.3], [-0.05, 1.05], [0.45, 1.0], [0.84, 0.85]];
+  for (const [base, height] of giants) {
+    const nx = base + (rand() - 0.5) * 0.05;
+    const x = nx * W;
+    const n = lidNormal(upperLid, x, false);
+    const aOpen = n * 0.85 + nx * 0.2;
+    const r = addRoot({ x, aOpen, aClosed: Math.sign(nx || 1) * (Math.PI - 0.6 * Math.abs(nx)), upper: true, follow: 0.2, sway: 0.01 + rand() * 0.008 });
+    const st = randomStyle(rand, n * 0.6 + nx * 0.25);
+    growBranch(r, 0, 0, aOpen, height * 0.38, 0.034 * (0.9 + 0.2 * rand()), Math.round(5 * detail) + 1, st, f, rand);
+  }
+
+  // every other upper lash: medium or small tree, radiating along the lid normal
+  const nUpper = Math.round(66 * detail);
+  for (let i = 0; i < nUpper; i++) {
+    const u = (i + 0.5) / nUpper;
+    const x = (2 * u - 1) * W * 0.985;
+    const nx = x / W;
+    const n = lidNormal(upperLid, x, false);
+    const medium = rand() < 0.42;
+    const aOpen = n * 0.9 + nx * 0.25 + (rand() - 0.5) * 0.3;
+    const r = addRoot({ x, aOpen, aClosed: Math.sign(nx || 1) * (Math.PI - 0.6 * Math.abs(nx)) + (rand() - 0.5) * 0.3, upper: true,
+                        follow: medium ? 0.45 : 0.8, sway: medium ? 0.006 : 0 });
+    const st = randomStyle(rand, n * 0.7 + nx * 0.2);
+    const height = medium ? 0.3 + rand() * 0.35 : 0.1 + rand() * 0.18;
+    growBranch(r, 0, 0, aOpen, height * 0.4, (medium ? 0.019 : 0.012) * (0.8 + 0.4 * rand()), medium ? 4 : 2, st, f, rand);
+  }
+
+  // lower lid: shorter trees hanging down and out; sparser toward the outer corner where the tears run
+  const nLower = Math.round(40 * detail);
+  for (let i = 0; i < nLower; i++) {
+    const u = (i + 0.5) / nLower;
+    const x = (2 * u - 1) * W * 0.98;
+    const nx = x / W;
+    if (nx > 0.2 && rand() < 0.5) continue;
+    const n = lidNormal(lowerLid, x, true);
+    const big = nx < -0.35 && rand() < 0.35;
+    const aOpen = n + nx * 0.15 + (rand() - 0.5) * 0.3;
+    const r = addRoot({ x, aOpen, aClosed: aOpen, upper: false, follow: 0.5, sway: big ? 0.006 : 0 });
+    const st = randomStyle(rand, n * 0.8 + nx * 0.15);
+    const height = big ? 0.4 + rand() * 0.3 : 0.1 + rand() * 0.2;
+    growBranch(r, 0, 0, aOpen, height * 0.4, (big ? 0.02 : 0.011) * (0.8 + 0.4 * rand()), big ? 4 : 2, st, f, rand);
+  }
+
+  // crystallised tears: a few beads, a few short runs, two or three long oozes, all near the outer corner
+  const tearPlan: [number, 0 | 1 | 2][] = [[0.42, 1], [0.5, 2], [0.58, 0], [0.66, 1], [0.73, 2], [0.8, 0], [0.87, 1], [0.93, 2]];
+  for (const [base, kind] of tearPlan) {
+    if (detail < 1 && kind === 0 && rand() < 0.5) continue;
+    const nx = base + (rand() - 0.5) * 0.04;
+    const r = addRoot({ x: nx * W, aOpen: Math.PI, aClosed: Math.PI, upper: false, follow: 0.7, sway: kind === 2 ? 0.01 : 0.004 });
+    growTear(f, r, kind, rand);
+  }
+
+  return f;
+}
+
+/* ---------- geometries ------------------------------------------------------------------- */
+
+const SEG_GEOM = new THREE.CylinderGeometry(0.42, 1, 1, 5, 1).translate(0, 0.5, 0);
+const CRYSTAL_GEOM = new THREE.OctahedronGeometry(1, 0).scale(1, 1, 0.45);
+const CENTER_GEOM = new THREE.SphereGeometry(1, 10, 10).scale(1, 1, 0.6);
+
+// teardrop hanging from its attachment point at the origin: narrow neck, bulb, rounded bottom
+const TEAR_GEOM = (() => {
+  const pts: THREE.Vector2[] = [];
+  const N = 18;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const r = Math.sqrt(Math.sin(Math.PI * t)) * (0.35 + 0.65 * t);
+    pts.push(new THREE.Vector2(Math.max(0.0001, r), -t));
+  }
+  return new THREE.LatheGeometry(pts, 14);
+})();
+
+const LEAF_GEOM = (() => {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0);
+  s.quadraticCurveTo(0.42, 0.35, 0.08, 1);
+  s.quadraticCurveTo(-0.3, 0.5, 0, 0);
+  return new THREE.ShapeGeometry(s, 6);
+})();
+
+const PETAL_GEOM = (() => {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0);
+  s.quadraticCurveTo(0.5, 0.3, 0.32, 0.8);
+  s.quadraticCurveTo(0.05, 1.08, 0, 1.0);
+  s.quadraticCurveTo(-0.05, 1.08, -0.32, 0.8);
+  s.quadraticCurveTo(-0.5, 0.3, 0, 0);
+  return new THREE.ShapeGeometry(s, 8);
+})();
+
+/* ---------- forest renderer -------------------------------------------------------------- */
+
+function Forest({ openRef, detail }: { openRef: React.MutableRefObject<number>; detail: number }) {
+  const segRef = useRef<THREE.InstancedMesh>(null!);
+  const threadRef = useRef<THREE.InstancedMesh>(null!);
+  const tearRef = useRef<THREE.InstancedMesh>(null!);
+  const crystalRef = useRef<THREE.InstancedMesh>(null!);
+  const leafRef = useRef<THREE.InstancedMesh>(null!);
+  const petalRef = useRef<THREE.InstancedMesh>(null!);
+  const centerRef = useRef<THREE.InstancedMesh>(null!);
+  const forest = useMemo(() => buildForest(detail), [detail]);
+  const petals = useMemo(
+    () => forest.flowers.flatMap((fl, fi) =>
+      Array.from({ length: fl.n * fl.layers }, (_, j) => ({ fi, k: j % fl.n, layer: Math.floor(j / fl.n) }))),
+    [forest]
+  );
+  const n = forest.roots.length;
+  const tmp = useMemo(
+    () => ({ m: new THREE.Matrix4(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(), q3: new THREE.Quaternion(),
+             p: new THREE.Vector3(), s: new THREE.Vector3(), e: new THREE.Euler(),
+             cos: new Float32Array(n), sin: new Float32Array(n), rootY: new Float32Array(n), delta: new Float32Array(n) }),
+    [n]
+  );
+
+  useEffect(() => {
+    const paint = (mesh: THREE.InstancedMesh, colors: THREE.Color[]) => {
+      colors.forEach((c, i) => mesh.setColorAt(i, c));
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    };
+    paint(crystalRef.current, forest.crystals.map((c) => c.color));
+    paint(leafRef.current, forest.leaves.map((l) => l.color));
+    paint(petalRef.current, petals.map((pt) => forest.flowers[pt.fi].color));
+    paint(centerRef.current, forest.flowers.map((fl) => fl.center));
+  }, [forest, petals]);
+
+  useFrame((state) => {
+    const open = openRef.current;
+    const now = state.clock.elapsedTime;
+    const { m, q, q2, q3, p, s, e, cos, sin, rootY, delta } = tmp;
+    const { roots, segs, threads, tears, crystals, leaves, flowers } = forest;
+    for (let i = 0; i < n; i++) {
+      const r = roots[i];
+      const d = r.follow * (1 - open) * (r.aClosed - r.aOpen) + r.sway * Math.sin(now * 0.7 + i);
+      delta[i] = d;
+      cos[i] = Math.cos(d);
+      sin[i] = Math.sin(d);
+      rootY[i] = (r.upper ? upperLid : lowerLid)(r.x) * open;
+    }
+    // position of an attachment point (ox, oy) on root k after the root's blink rotation
+    const px = (k: number, ox: number, oy: number) => roots[k].x + ox * cos[k] + oy * sin[k];
+    const py = (k: number, ox: number, oy: number) => rootY[k] + oy * cos[k] - ox * sin[k];
+
+    const place = (mesh: THREE.InstancedMesh, list: Seg[]) => {
+      for (let i = 0; i < list.length; i++) {
+        const sg = list[i];
+        const k = sg.root;
+        p.set(px(k, sg.ox, sg.oy), py(k, sg.ox, sg.oy), Z_LASH + sg.oz);
+        e.set(0, 0, -(sg.a + delta[k]));
+        q.setFromEuler(e);
+        s.set(sg.th, sg.len, sg.th);
+        m.compose(p, q, s);
+        mesh.setMatrixAt(i, m);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    place(segRef.current, segs);
+    place(threadRef.current, threads);
+
+    for (let i = 0; i < tears.length; i++) {
+      const t = tears[i];
+      p.set(px(t.root, t.ox, t.oy), py(t.root, t.ox, t.oy), Z_LASH + 0.02);
+      e.set(0, 0, -delta[t.root] * 0.3);
+      q.setFromEuler(e);
+      const wob = 1 + 0.04 * Math.sin(now * 1.7 + t.phase);
+      s.set(t.rx * wob, t.ry / wob, t.rx * wob);
+      m.compose(p, q, s);
+      tearRef.current.setMatrixAt(i, m);
+    }
+    tearRef.current.instanceMatrix.needsUpdate = true;
+
+    for (let i = 0; i < crystals.length; i++) {
+      const c = crystals[i];
+      p.set(px(c.root, c.ox, c.oy), py(c.root, c.ox, c.oy), Z_LASH + c.oz);
+      e.set(c.tilt, now * c.spin + c.rot, c.rot - delta[c.root]);
+      q.setFromEuler(e);
+      const tw = 0.9 + 0.1 * Math.sin(now * 2.2 + c.rot * 7);
+      s.set(c.sx * tw, c.sy * tw, c.sx * tw);
+      m.compose(p, q, s);
+      crystalRef.current.setMatrixAt(i, m);
+    }
+    crystalRef.current.instanceMatrix.needsUpdate = true;
+
+    for (let i = 0; i < leaves.length; i++) {
+      const lf = leaves[i];
+      p.set(px(lf.root, lf.ox, lf.oy), py(lf.root, lf.ox, lf.oy), Z_LASH + lf.oz);
+      q.setFromAxisAngle(Z_AXIS, -(lf.dir + delta[lf.root]));
+      q2.setFromAxisAngle(Y_AXIS, lf.turn + 0.18 * Math.sin(now * 1.6 + lf.phase));
+      q3.setFromAxisAngle(X_AXIS, lf.curl);
+      q.multiply(q2).multiply(q3);
+      s.set(lf.width, lf.len, 1);
+      m.compose(p, q, s);
+      leafRef.current.setMatrixAt(i, m);
+    }
+    leafRef.current.instanceMatrix.needsUpdate = true;
+
+    for (let i = 0; i < petals.length; i++) {
+      const { fi, k, layer } = petals[i];
+      const fl = flowers[fi];
+      p.set(px(fl.root, fl.ox, fl.oy), py(fl.root, fl.ox, fl.oy), Z_LASH + fl.oz + layer * 0.004);
+      const dir = fl.rot + now * fl.spin + (k + layer * 0.5) * ((Math.PI * 2) / fl.n) - delta[fl.root];
+      q.setFromAxisAngle(X_AXIS, fl.tiltX).multiply(q2.setFromAxisAngle(Y_AXIS, fl.tiltY));
+      q.multiply(q2.setFromAxisAngle(Z_AXIS, dir)).multiply(q3.setFromAxisAngle(X_AXIS, fl.cup + layer * 0.25));
+      const sz = fl.size * (layer ? 0.65 : 1);
+      s.set(sz * 0.9, sz, 1);
+      m.compose(p, q, s);
+      petalRef.current.setMatrixAt(i, m);
+    }
+    petalRef.current.instanceMatrix.needsUpdate = true;
+
+    for (let i = 0; i < flowers.length; i++) {
+      const fl = flowers[i];
+      p.set(px(fl.root, fl.ox, fl.oy), py(fl.root, fl.ox, fl.oy), Z_LASH + fl.oz + 0.012);
+      q.setFromAxisAngle(X_AXIS, fl.tiltX).multiply(q2.setFromAxisAngle(Y_AXIS, fl.tiltY));
+      const sz = fl.size * (fl.cup > 1 ? 0.2 : 0.3);
+      s.set(sz, sz, sz);
+      m.compose(p, q, s);
+      centerRef.current.setMatrixAt(i, m);
+    }
+    centerRef.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <>
+      <instancedMesh ref={segRef} args={[SEG_GEOM, undefined, forest.segs.length]} frustumCulled={false}>
+        <meshStandardMaterial color="#0a0206" roughness={0.65} metalness={0.08} />
+      </instancedMesh>
+      <instancedMesh ref={threadRef} args={[SEG_GEOM, undefined, forest.threads.length]} frustumCulled={false} renderOrder={2}>
+        <meshBasicMaterial color="#ffd9e8" transparent opacity={0.9} />
+      </instancedMesh>
+      <instancedMesh ref={tearRef} args={[TEAR_GEOM, undefined, forest.tears.length]} frustumCulled={false}>
+        <meshPhysicalMaterial color="#ffe4ee" transparent opacity={0.82} roughness={0.04} metalness={0.05} clearcoat={1} clearcoatRoughness={0.03} emissive="#ff8fb3" emissiveIntensity={0.12} />
+      </instancedMesh>
+      <instancedMesh ref={crystalRef} args={[CRYSTAL_GEOM, undefined, forest.crystals.length]} frustumCulled={false}>
+        <meshPhysicalMaterial color="#ffffff" emissive="#ff7fae" emissiveIntensity={0.25} roughness={0.12} clearcoat={1} transparent opacity={0.9} />
+      </instancedMesh>
+      <instancedMesh ref={leafRef} args={[LEAF_GEOM, undefined, forest.leaves.length]} frustumCulled={false}>
+        <meshStandardMaterial color="#ffffff" roughness={0.7} metalness={0} side={THREE.DoubleSide} />
+      </instancedMesh>
+      <instancedMesh ref={petalRef} args={[PETAL_GEOM, undefined, petals.length]} frustumCulled={false}>
+        <meshStandardMaterial color="#ffffff" emissive="#ff4f8a" emissiveIntensity={0.12} roughness={0.55} side={THREE.DoubleSide} />
+      </instancedMesh>
+      <instancedMesh ref={centerRef} args={[CENTER_GEOM, undefined, forest.flowers.length]} frustumCulled={false}>
+        <meshStandardMaterial color="#ffffff" emissive="#ffb347" emissiveIntensity={0.3} roughness={0.6} />
+      </instancedMesh>
+    </>
+  );
+}
+
+/* ---------- the eye ---------------------------------------------------------------------- */
+
+function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: number; reduced: boolean; detail: number }) {
+  const eye = useRef<THREE.Group>(null!);
+  const scan = useRef<THREE.Mesh>(null!);
+  const scanGlow = useRef<THREE.Mesh>(null!);
+  const ring = useRef<THREE.Mesh>(null!);
+  const openRef = useRef(0);
+  const blink = useRef({ t: -1, next: 3 });
+
+  const eyeMat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: EYE_VERT,
+        fragmentShader: EYE_FRAG,
+        uniforms: {
+          uTime: { value: 0 },
+          uPupil: { value: 0.36 },
+          uIrisA: { value: new THREE.Color("#ff8fb3") },
+          uIrisB: { value: new THREE.Color("#4a1a6b") },
+          uIrisC: { value: new THREE.Color("#ffe3ee") },
+        },
+      }),
+    []
+  );
+  const faceMat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: FACE_VERT,
+        fragmentShader: FACE_FRAG,
+        uniforms: { uOpen: { value: 0 }, uTime: { value: 0 } },
+        transparent: true,
+        depthWrite: false,
+      }),
+    []
+  );
+
+  useFrame((state, dt) => {
+    const now = state.clock.elapsedTime;
+    eyeMat.uniforms.uTime.value = now;
+    eyeMat.uniforms.uPupil.value = 0.34 + 0.03 * Math.sin(now * 0.7);
+    faceMat.uniforms.uTime.value = now;
+
+    const tx = THREE.MathUtils.clamp(-pointer.y * 0.22, -0.25, 0.25);
+    const ty = THREE.MathUtils.clamp(pointer.x * 0.33, -0.38, 0.38);
+    eye.current.rotation.x += (tx - eye.current.rotation.x) * Math.min(1, dt * 6);
+    eye.current.rotation.y += (ty - eye.current.rotation.y) * Math.min(1, dt * 6);
+
+    let open = 1;
+    if (!reduced) {
+      const b = blink.current;
+      if (b.t < 0 && now > b.next) b.t = 0;
+      if (b.t >= 0) {
+        b.t += dt;
+        const d = 0.32;
+        if (b.t > d) {
+          b.t = -1;
+          b.next = now + 2.5 + Math.random() * 4.5;
+        } else {
+          const ph = b.t / d;
+          open = ph < 0.4 ? 1 - smooth(ph / 0.4) : smooth((ph - 0.4) / 0.6);
+        }
+      }
+      open *= easeOut(Math.min(1, now / 2.4));
+    }
+    openRef.current = open;
+    faceMat.uniforms.uOpen.value = open;
+
+    const s = reduced ? 0.3 : Math.sin(now * 0.8) * 0.75;
+    scan.current.rotation.x = s;
+    scanGlow.current.rotation.x = s;
+    ring.current.rotation.z = now * 0.25;
+    (ring.current.material as THREE.MeshBasicMaterial).opacity = 0.3 + 0.25 * Math.sin(now * 2.0);
+  });
+
+  return (
+    <group position={[offsetX, 0.05, 0]} scale={scale}>
+      <group ref={eye}>
+        <mesh material={eyeMat}>
+          <sphereGeometry args={[Z_EYE_R, 128, 128]} />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[Z_EYE_R + 0.02, 96, 96]} />
+          <meshPhysicalMaterial color="#ffffff" transparent opacity={0.14} roughness={0.03} metalness={0} clearcoat={1} clearcoatRoughness={0.02} depthWrite={false} />
+        </mesh>
+        <mesh ref={ring} position={[0, 0, Z_EYE_R * Math.cos(0.34) + 0.004]}>
+          <torusGeometry args={[Z_EYE_R * Math.sin(0.34), 0.004, 8, 128]} />
+          <meshBasicMaterial color="#ff2e6e" transparent opacity={0.45} blending={THREE.AdditiveBlending} depthWrite={false} />
+        </mesh>
+        <mesh ref={scan}>
+          <sphereGeometry args={[Z_EYE_R + 0.03, 128, 2, 0, Math.PI, Math.PI / 2 - 0.01, 0.02]} />
+          <meshBasicMaterial color="#ff5c8d" transparent opacity={0.95} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+        <mesh ref={scanGlow}>
+          <sphereGeometry args={[Z_EYE_R + 0.028, 128, 6, 0, Math.PI, Math.PI / 2 - 0.1, 0.2]} />
+          <meshBasicMaterial color="#ff2e6e" transparent opacity={0.1} blending={THREE.AdditiveBlending} depthWrite={false} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+
+      <mesh position={[0, 0, Z_FACE]} material={faceMat} renderOrder={1}>
+        <planeGeometry args={[9, 6]} />
+      </mesh>
+
+      <Forest openRef={openRef} detail={detail} />
+
+      <Sparkles count={30} scale={[1.1, 0.8, 0.3]} position={[W * 0.65, -0.7, Z_LASH + 0.12]} size={1.6} speed={0.4} opacity={0.8} color="#ffffff" />
+      <Sparkles count={70} scale={[3.0, 1.8, 0.5]} position={[0.2, 1.1, Z_LASH + 0.12]} size={1.6} speed={0.3} opacity={0.6} color="#ffd6e6" />
+
+      <ambientLight intensity={0.45} />
+      <pointLight position={[2.5, 3, 4]} intensity={60} color="#ffe6ee" />
+      <pointLight position={[-3.5, -1.5, 3]} intensity={25} color="#b14bd6" />
+      <pointLight position={[0, -3, 2.5]} intensity={12} color="#ff2e6e" />
+    </group>
+  );
+}
+
+export default function EyeScene() {
+  const reduced = useMedia("(prefers-reduced-motion: reduce)");
+  const narrow = useMedia("(max-width: 820px)");
+  useEffect(() => {
+    const on = (e: PointerEvent) => {
+      pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+      pointer.y = (e.clientY / window.innerHeight) * 2 - 1;
+    };
+    window.addEventListener("pointermove", on, { passive: true });
+    return () => window.removeEventListener("pointermove", on);
+  }, []);
+  return (
+    <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, 6], fov: 30 }} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
+      <EyeRig offsetX={narrow ? 0 : 1.05} scale={narrow ? 0.6 : 1} reduced={reduced} detail={narrow ? 0.6 : 1} />
+    </Canvas>
+  );
+}

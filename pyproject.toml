@@ -1,0 +1,39 @@
+[project]
+name = "genai-dr-gan"
+version = "0.1.0"
+description = "When Does a GAN Help? GAN-generated retinal images vs simple fixes for rare severe DR grades"
+requires-python = ">=3.11"
+dependencies = [
+  "timm>=1.0",
+  "scikit-learn>=1.4",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "pillow>=10",
+  "imagehash>=4.3",
+  "opencv-python-headless>=4.9",
+  "tqdm",
+  "matplotlib>=3.8",
+  "seaborn>=0.13",
+  "grad-cam>=1.5",
+  "kaggle>=1.6",
+  "click>=8",
+  "requests",
+  "scipy",
+  "psutil",
+  "filelock",
+  "huggingface_hub",
+]
+
+[project.optional-dependencies]
+api = ["fastapi", "uvicorn[standard]", "python-multipart"]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["src*", "api*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

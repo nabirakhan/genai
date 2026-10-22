@@ -1,0 +1,69 @@
+/* Design tokens from Nabira's reference palettes (Oct 2026). Tokens only; layout/styling is designed later.
+   Palette A "wine gradient": #46000D #5E0009 #720137 #590054 #42002E
+   Palette B "dark glass":    #411D2B #211720 #110E15 #2A0A11 #430E18 (+ neon pink highlight lines) */
+:root {
+  /* surfaces (palette B, darkest -> lightest) */
+  --bg: #110e15;
+  --bg-elevated: #211720;
+  --surface: #2a0a11;
+  --surface-2: #411d2b;
+  --surface-3: #430e18;
+
+  /* brand (palette A) */
+  --wine-900: #46000d;
+  --wine-700: #5e0009;
+  --magenta-600: #720137;
+  --purple-600: #590054;
+  --plum-800: #42002e;
+
+  /* accents derived for contrast on the dark surfaces */
+  --accent: #ff2e6e;          /* neon pink, interactive elements (contrast on --bg ~ 6.3:1) */
+  --accent-soft: #ff7aa2;     /* hover / focus */
+  --accent-purple: #b14bd6;   /* secondary accent, charts */
+
+  /* text */
+  --text: #f6ebf0;            /* ~16:1 on --bg */
+  --text-muted: #c9a9b6;      /* ~9:1 on --bg */
+  --text-dim: #8d6e7c;        /* ~4.6:1 on --bg: captions only */
+
+  /* semantic */
+  --ok: #4fd1a1;
+  --warn: #ffc857;
+  --danger: #ff5c5c;
+  --border: rgba(255, 255, 255, 0.08);
+
+  /* gradients (palette A sweep, for hero / cards) */
+  --gradient-wine: linear-gradient(135deg, #46000d 0%, #5e0009 30%, #720137 60%, #590054 85%, #42002e 100%);
+  --gradient-glow: radial-gradient(60% 60% at 20% 20%, rgba(255, 46, 110, 0.25), transparent 70%);
+
+  /* grade colours for charts / probability bars (0 = healthy -> 4 = proliferative) */
+  --grade-0: #4fd1a1;
+  --grade-1: #b8d96a;
+  --grade-2: #ffc857;
+  --grade-3: #ff7a45;
+  --grade-4: #ff2e6e;
+
+  /* type: editorial serif for display (matches the book-cover feel), humanist sans for UI text.
+     Load both from Google Fonts in index.html when the UI is designed; until then system fallbacks apply. */
+  --font-display: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --font-body: "Manrope", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, monospace;
+
+  --radius: 12px;
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
