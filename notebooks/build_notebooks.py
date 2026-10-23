@@ -259,6 +259,34 @@ shutil.rmtree(CODE, ignore_errors=True)'''),
 ]
 
 
+AUDIT_CELLS = [
+    ("markdown", """# Duplicate audit (CPU): what does each rule call a near-duplicate?
+
+Input: **APTOS 2019 Blindness Detection** competition. Internet ON. Crops all 3,662 images to 256 px,
+then compares the pHash rule with a vessel-pattern correlation and shows contact sheets of flagged pairs."""),
+    ("code", f'''REPO = "{REPO_URL}"'''),
+    PREP_CELLS[2],
+    ("code", '''DATA = f"{WORK}/data"; OUT = f"{WORK}/out"
+os.environ["GENAI_DATA"] = DATA
+os.makedirs(f"{DATA}/raw/aptos", exist_ok=True)
+found = [os.path.dirname(p) for p in glob.glob("/kaggle/input/**/train.csv", recursive=True)
+         if os.path.isdir(os.path.join(os.path.dirname(p), "train_images"))]
+assert found, "add the APTOS 2019 competition as input"
+if not os.path.exists(f"{DATA}/raw/aptos/train_images"):
+    os.symlink(f"{found[0]}/train_images", f"{DATA}/raw/aptos/train_images")
+shutil.copy(f"{found[0]}/train.csv", f"{DATA}/raw/aptos/train.csv")
+sh([sys.executable, "-m", "src.data.prepare_images", "--source", "aptos"])
+sh([sys.executable, "-m", "src.data.dedup_audit", "--out", f"{OUT}/audit"])'''),
+    ("code", '''from IPython.display import Image as IImage, display
+print(open(f"{OUT}/audit/summary.txt").read())
+display(IImage(f"{OUT}/audit/sheet_phash_pairs.png"))
+display(IImage(f"{OUT}/audit/sheet_top_corr.png"))
+os.chdir(WORK)
+shutil.rmtree(DATA, ignore_errors=True)
+shutil.rmtree(CODE, ignore_errors=True)'''),
+]
+
+
 def nb(cells):
     out = {"cells": [], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
                                      "language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 5}
@@ -272,6 +300,7 @@ def nb(cells):
 
 if __name__ == "__main__":
     (HERE / "kaggle_data_prep.ipynb").write_text(json.dumps(nb(PREP_CELLS), indent=1), encoding="utf-8")
+    (HERE / "kaggle_dedup_audit.ipynb").write_text(json.dumps(nb(AUDIT_CELLS), indent=1), encoding="utf-8")
     (HERE / "kaggle_gan_train.ipynb").write_text(json.dumps(nb(TRAIN_CELLS), indent=1), encoding="utf-8")
     (HERE / "kaggle_gan_eval.ipynb").write_text(json.dumps(nb(EVAL_CELLS), indent=1), encoding="utf-8")
     print("wrote kaggle_data_prep.ipynb, kaggle_gan_train.ipynb, kaggle_gan_eval.ipynb")
