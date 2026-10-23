@@ -53,6 +53,16 @@ Covers `bias_act`, `upfirdn2d` and `filtered_lrelu`, which all go through `get_p
 **Verification.** ADA's augment pipe with `grid_sample_gradfix` and `conv2d_gradfix` enabled runs
 forward plus the double backward that R1 needs on PyTorch 2.14 (CPU).
 
+## 0004-infinite-sampler-init.patch
+
+**Problem.** `misc.InfiniteSampler.__init__` calls `super().__init__(dataset)`. PyTorch removed
+`Sampler.__init__(data_source)`, so the call reaches `object.__init__` and training dies at
+"Loading training set..." with `TypeError: object.__init__() takes exactly one argument`.
+
+**Change.** `super().__init__()`.
+
+**Verification.** All four patches apply with `git apply` to a pristine LF checkout of the pinned commit.
+
 ## Not patched (checked)
 
 - `torch_utils/ops/grid_sample_gradfix.py` already handles PyTorch >= 1.12 (`op[0]`), so ADA runs
