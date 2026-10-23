@@ -23,7 +23,10 @@ else:
 os.chdir(CODE)
 subprocess.run([sys.executable, "scripts/apply_patches.py"], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "click", "requests", "tqdm", "ninja",
-                "imageio-ffmpeg", "psutil", "scipy", "pyspng"], check=True)
+                "psutil", "scipy"], check=True)
+for opt in ("pyspng", "imageio-ffmpeg"):    # speed-ups only; stylegan3 falls back without them
+    if subprocess.run([sys.executable, "-m", "pip", "install", "-q", opt]).returncode:
+        print("optional package not installed:", opt)
 if shutil.which("nvidia-smi"):
     print(subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv"], capture_output=True, text=True).stdout)
 import torch; print("torch", torch.__version__, "gpus", torch.cuda.device_count())
@@ -215,7 +218,8 @@ Download `splits/*.csv` and commit them to the repo so every machine uses the sa
 APTOS_INPUT = "auto"      # "auto" finds the folder holding train.csv + train_images under /kaggle/input
 IDRID_INPUT = ""          # e.g. "/kaggle/input/idrid-disease-grading" (optional)
 MAKE_CACHE = False        # also build the uint8 .npy caches (~800 MB) for the Kaggle classifier fallback'''),
-    ("code", SETUP.replace('"ninja",\n                "imageio-ffmpeg", "psutil", "scipy", "pyspng"', '"imagehash", "opencv-python-headless", "scikit-learn", "pandas", "scipy", "pillow"')),
+    ("code", SETUP.replace('"ninja",\n                "psutil", "scipy"', '"imagehash", "opencv-python-headless", "scikit-learn", "pandas", "scipy", "pillow"')
+                  .replace('for opt in ("pyspng", "imageio-ffmpeg"):', 'for opt in ():')),
     ("code", '''DATA = f"{WORK}/data"; OUT = f"{WORK}/out"
 os.environ["GENAI_DATA"] = DATA
 os.environ["GENAI_SPLITS"] = f"{OUT}/splits"
