@@ -83,6 +83,7 @@ metadata, overall FID/KID vs the val split (`calc_metrics.py`) and per-class FID
 Lab PC: `kaggle kernels output <user>/<this-notebook> -p downloads/`, then `python -m src.gan.import_synth downloads/synth_f*.zip`."""),
     ("code", f'''REPO = "{REPO_URL}"
 N_PER_CLASS, PSI, CLASSES = 500, 0.8, "3,4"
+TRUNC_CENTER = "global"   # "global" = stylegan3 w_avg (mostly grade 0) | "class" = each grade's mean w
 ONLY_TAGS = None          # e.g. ["f100-ada"]; None = every GAN that reached the session kimg budget
 GPUS = 2'''),
     ("code", SETUP),
@@ -108,7 +109,7 @@ REAL_VAL = str(val); print("REAL_VAL =", REAL_VAL, f"({why})")'''),
 overall = []
 for tag, pkl in PKLS.items():
     out = f"{WORK}/synth_{tag}"
-    sh([sys.executable, "-m", "src.gan.generate", "--pkl", pkl, "--outdir", out, "--classes", CLASSES, "--n", str(N_PER_CLASS), "--psi", str(PSI), "--tag", tag])
+    sh([sys.executable, "-m", "src.gan.generate", "--pkl", pkl, "--outdir", out, "--classes", CLASSES, "--n", str(N_PER_CLASS), "--psi", str(PSI), "--tag", tag, "--trunc-center", TRUNC_CENTER])
     r = subprocess.run([sys.executable, "third_party/stylegan3/calc_metrics.py", "--metrics=fid50k_full,kid50k_full", f"--network={pkl}", f"--data={REAL_VAL}", f"--gpus={GPUS}"], capture_output=True, text=True)
     print(r.stdout[-1500:], r.stderr[-800:])
     res = {}
