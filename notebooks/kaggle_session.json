@@ -1,0 +1,8 @@
+{
+ "kimg": 1000,
+ "hours": 10,
+ "run": "auto",
+ "min_start": 35,
+ "grace": 50,
+ "first_session": false
+}

@@ -11,8 +11,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_URL = "https://github.com/nabirakhan/genai"
-FFHQ = ("https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/transfer-learning-source-nets/"
-        "ffhq-res256-mirror-paper256-noaug.pkl")
 
 SETUP = f'''import os, sys, glob, re, json, time, shutil, signal, subprocess
 WORK = "/kaggle/working"; CODE = f"{{WORK}}/genai"
@@ -35,104 +33,43 @@ def sh(cmd, **kw):
 '''
 
 TRAIN_CELLS = [
-    ("markdown", f"""# Conditional StyleGAN2-ADA fine-tune on APTOS-256 (Kaggle T4 x2)
+    ("markdown", """# Conditional StyleGAN2-ADA fine-tunes on APTOS-256 (Kaggle T4 x2)
 
-One notebook, one configuration per version (`FRACTION`, `AUG`). Before running:
+Each version is one session (~10 h) of the queue **f100-ada → f010-ada → f010-noaug (ablation) → f025-ada → f050-ada**,
+every GAN trained to the same total kimg. The logic lives in the repo (`src/gan/kaggle_train.py`, settings in
+`notebooks/kaggle_session.json`), so a git push changes the next session while this notebook stays the same.
 
-1. **Add data**: the private dataset `aptos-dr-256-genai` (built by the lab PC, S7).
-2. **Resume**: add the previous version's *output* of this notebook as an input (`RESUME="auto"` finds the latest snapshot for the same `FRACTION-AUG`). First session uses the FFHQ-256 checkpoint.
-3. Settings: Accelerator **GPU T4 x2**, **Internet ON**. Run with *Save Version → Save & Run All (Commit)* so `/kaggle/working/runs` persists.
+Before every *Save Version → Save & Run All (Commit)*:
+1. **Input: the genai-data-prep output** whose `splits/aptos_splits.csv` equals the repo's committed split (checked:
+   the f010-f050 zips depend on it, f100 must hold exactly the committed train ids).
+2. **Input: the newest output of this notebook** (snapshots, `final/`, `ledger.json`). Without it the session refuses
+   to start, so nothing restarts from FFHQ by accident (`first_session` in the JSON is only for the very first one).
+3. Settings: Accelerator **GPU T4 x2**, **Internet ON**.
 
-Budget: `HOURS` of training per session (keep total < 12 h). Snapshots every `SNAP*4` kimg; only the last two are kept. `KIMG` is the **total** training length across sessions; the same value is used for every fraction once chosen from the f100 run.
-Order of runs: f100-ada (sanity) → f010-ada → f010-noaug (ablation) → f025-ada → f050-ada."""),
-    ("code", f'''FRACTION = "f100"      # f010 | f025 | f050 | f100
-AUG = "ada"            # ada | noaug  (noaug only for the f010 ablation)
-KIMG = 1000            # total kimg target across sessions (decide after f100 plateaus)
-HOURS = 8.5            # training wall-clock budget for THIS session
-RESUME = "auto"        # "ffhq" | "auto" (latest snapshot for FRACTION-AUG under /kaggle/input) | explicit path
-REPO = "{REPO_URL}"
-DATASET_DIR = "/kaggle/input/aptos-dr-256-genai"
-GPUS, BATCH, BATCH_GPU, GAMMA, SNAP = 2, 32, 16, 1.0, 10
-FFHQ = "{FFHQ}"'''),
+The newest version's output always holds every finished GAN (`final/<tag>_kimg<N>.pkl`) plus the running one's
+last two snapshots; the eval notebook attaches only that output."""),
+    ("code", f'''REPO = "{REPO_URL}"
+OVERRIDES = []        # e.g. ["--hours", "6"] or ["--run", "f010-noaug"]; empty = notebooks/kaggle_session.json'''),
     ("code", SETUP),
-    ("code", '''# the zips come either from the data-prep notebook's output or from the aptos-dr-256-genai dataset
-cands = sorted(glob.glob(f"/kaggle/input/**/aptos256_{FRACTION}.zip", recursive=True)) + \\
-        sorted(glob.glob(f"/kaggle/input/**/aptos256_{FRACTION}", recursive=True))
-if not cands:
-    raise SystemExit(f"aptos256_{FRACTION} not found under /kaggle/input: add the data-prep notebook output or the dataset as input")
-src = cands[0]
-if os.path.isdir(src):                      # Kaggle extracted the zip -> re-zip locally (faster reads)
-    DATA = f"{WORK}/data/aptos256_{FRACTION}.zip"
-    if not os.path.exists(DATA):
-        os.makedirs(f"{WORK}/data", exist_ok=True)
-        shutil.make_archive(DATA[:-4], "zip", src)
-else:
-    DATA = src
-print("DATA =", DATA, json.load(__import__("zipfile").ZipFile(DATA).open("dataset.json"))["labels"][:3])'''),
-    ("code", '''def total_kimg(path):
-    m = re.search(r"-from(\\d+)[/\\\\].*snapshot-(\\d+)", path)
-    return int(m.group(1)) + int(m.group(2)) if m else 0
-def latest_snapshot():
-    snaps = [s for s in glob.glob("/kaggle/input/**/network-snapshot-*.pkl", recursive=True) if f"-{FRACTION}-{AUG}-from" in s]
-    return max(snaps, key=total_kimg) if snaps else None
-if RESUME == "ffhq":
-    RESUME_PKL = FFHQ
-elif RESUME == "auto":
-    RESUME_PKL = latest_snapshot() or FFHQ
-else:
-    RESUME_PKL = RESUME
-START = 0 if RESUME_PKL == FFHQ else total_kimg(RESUME_PKL)
-REMAIN = max(0, KIMG - START)
-print(f"resume from {RESUME_PKL}\\nalready trained {START} kimg, this session trains up to {REMAIN} kimg")
-if RESUME_PKL == FFHQ:
-    sh([sys.executable, "scripts/check_resume_compat.py", "--pkl", FFHQ])'''),
-    ("code", '''desc = f"{FRACTION}-{AUG}-from{START}"
-cmd = [sys.executable, "third_party/stylegan3/train.py", f"--outdir={WORK}/runs", "--cfg=stylegan2", f"--data={DATA}",
-       "--cond=1", f"--gpus={GPUS}", f"--batch={BATCH}", f"--batch-gpu={BATCH_GPU}", f"--gamma={GAMMA}",
-       "--cbase=16384", "--cmax=512", "--map-depth=8", "--mbstd-group=8", "--mirror=1", f"--aug={AUG}", "--target=0.6",
-       f"--kimg={REMAIN}", "--tick=4", f"--snap={SNAP}", "--metrics=none", "--workers=2", f"--resume={RESUME_PKL}", f"--desc={desc}"]
-print(" ".join(cmd))
-def run_dir():
-    ds = sorted(glob.glob(f"{WORK}/runs/*-{desc}")); return ds[-1] if ds else None
-def snapshots():
-    d = run_dir(); return sorted(glob.glob(f"{d}/network-snapshot-*.pkl")) if d else []
-def prune(keep=2):
-    for s in snapshots()[:-keep]:
-        os.remove(s)
-if REMAIN == 0:
-    print("KIMG already reached; nothing to train")
-else:
-    logf = open(f"{WORK}/train_{desc}.log", "a")
-    p = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True)
-    t0 = time.time(); deadline = t0 + HOURS * 3600; stop_after = None; last_print = 0
-    while p.poll() is None:
-        time.sleep(60); prune()
-        if time.time() - last_print > 600:
-            last_print = time.time()
-            tail = subprocess.run(["tail", "-n", "2", logf.name], capture_output=True, text=True).stdout.strip()
-            print(f"[{(time.time()-t0)/3600:.2f} h] {tail[-300:]}")
-        if stop_after is None and time.time() > deadline:
-            stop_after = snapshots()[-1] if snapshots() else ""
-            print("time budget reached; stopping after the next snapshot")
-        if stop_after is not None and snapshots() and snapshots()[-1] != stop_after:
-            time.sleep(45)   # let the pickle finish writing
-            os.killpg(os.getpgid(p.pid), signal.SIGTERM); print("stopped after", snapshots()[-1]); break
-        if stop_after is not None and time.time() > deadline + 50 * 60:
-            os.killpg(os.getpgid(p.pid), signal.SIGTERM); print("no new snapshot within 50 min; stopped"); break
-    logf.close(); prune()
-    print("exit code", p.poll())'''),
-    ("code", '''from IPython.display import Image as IImage, display
-d = run_dir()
-if d:
-    snaps = snapshots()
-    print("run dir:", d); print("snapshots kept:", [os.path.basename(s) for s in snaps])
-    if snaps: print(f"TOTAL kimg now = {total_kimg(snaps[-1])}  (use RESUME='auto' next session)")
-    fakes = sorted(glob.glob(f"{d}/fakes*.png"))
-    if fakes: display(IImage(fakes[-1], width=900))
-    print(subprocess.run(["tail", "-n", "3", f"{d}/log.txt"], capture_output=True, text=True).stdout)
+    ("code", '''r = subprocess.run([sys.executable, "-m", "src.gan.kaggle_train", *OVERRIDES])
+print("runner exit code", r.returncode)'''),
+    ("code", '''from PIL import Image as PImage
+from IPython.display import display
+for d in sorted(glob.glob(f"{WORK}/runs/*")):
+    fakes = sorted(glob.glob(f"{d}/fakes[0-9]*.png"))       # fakes_init.png would sort last
+    print(os.path.basename(d), "->", os.path.basename(fakes[-1]) if fakes else "no fakes yet")
+    if fakes:
+        im = PImage.open(fakes[-1]); im.thumbnail((1536, 1536)); display(im)   # full grid is 7680x4096
+print(open(f"{WORK}/ledger.json").read() if os.path.exists(f"{WORK}/ledger.json") else "no ledger.json")
+for root, _, files in os.walk(WORK):
+    for f in files:
+        p = os.path.join(root, f)
+        if os.path.getsize(p) > 5e7: print(f"{os.path.getsize(p) / 1e6:8.0f} MB  {p}")
 os.chdir(WORK)
-shutil.rmtree(f"{WORK}/data", ignore_errors=True)      # keep the saved output small
-shutil.rmtree(CODE, ignore_errors=True)'''),
+shutil.rmtree(f"{WORK}/data", ignore_errors=True)
+shutil.rmtree(CODE, ignore_errors=True)
+if r.returncode == 4:
+    raise RuntimeError("the runner trained nothing (refused or misconfigured inputs): see its log above")'''),
 ]
 
 EVAL_CELLS = [
@@ -213,7 +150,8 @@ Use this when the lab PC has not produced the dataset yet. Before running:
 
 Output (`/kaggle/working/out`): `splits/aptos_dedup_dropped.csv`, `splits/aptos_splits.csv`, `sg3/aptos256_f010..f100.zip`, `sg3/aptos256_val.zip`.
 Then in the GAN notebooks use **Add Input → Your Work → this notebook** (its output is searched automatically).
-Download `splits/*.csv` and commit them to the repo so every machine uses the same split."""),
+Download `splits/*.csv` and commit them to the repo's `splits/` so every machine uses the split the GAN zips were built from.
+They hold image ids, split and a grade-blind `frac_rank` only (no labels: APTOS terms, public repo); keep this notebook private."""),
     ("code", f'''REPO = "{REPO_URL}"
 APTOS_INPUT = "auto"      # "auto" finds the folder holding train.csv + train_images under /kaggle/input
 IDRID_INPUT = ""          # e.g. "/kaggle/input/idrid-disease-grading" (optional)
