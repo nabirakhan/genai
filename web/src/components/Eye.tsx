@@ -1,30 +1,45 @@
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Sparkles } from "@react-three/drei";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 
 /* Shatter-Me style eye. An almond aperture cut into a painted face plane, a large iridescent
-   eyeball (with branching blood vessels) behind it that follows the cursor. Every lash on both
-   lids IS a branch: a gnarled axis that keeps growing with side branches peeling off, forks, and
-   twiggy clumps at the ends, radiating outward from the lid line. Five big limbs rise from the
-   upper lid. Leaves grow along the twigs, with sparse crystals and a few flowers at the ends.
-   A handful of crystallised tears, each a smooth water body with its own neck/bulb profile,
-   hang from the outer lower lid. Blink = the aperture closes and the lashes bend. */
+   eyeball (with branching blood vessels) behind it that follows the cursor. The camera looks
+   straight at the eye and the frame is lens-shifted to place it on the right, so the sclera
+   fills both corners. The inner (right) corner is a small rounded notch where the tears drain.
+   Every lash on both lids IS a branch: a gnarled axis with side branches, forks and twiggy
+   clumps, radiating outward from the lid line. Five big limbs rise from the upper lid. Leaves
+   grow along the twigs, with sparse crystals and a few flowers at the ends. A handful of
+   crystallised tears, each a smooth water body with its own neck/bulb profile, hang from the
+   lower lid. Blink = the aperture closes and the lashes bend. */
 
 const W = 1.25; // half width of the eye aperture (world units)
-const Z_EYE_R = 1.4;
-const Z_FACE = 1.55;
-const Z_LASH = 1.62;
+const Z_EYE_R = 1.55; // eyeball radius: big enough that the aperture corners never look past it
+const Z_FACE = Z_EYE_R + 0.15;
+const Z_LASH = Z_FACE + 0.07;
+const IRIS_PROJ = 1.4 * Math.sin(0.34); // projected iris radius kept from the earlier tuning
+const IRIS_T = Math.asin(IRIS_PROJ / Z_EYE_R); // polar angle of the iris edge on this sphere
+const ANG_SCALE = 0.34 / IRIS_T; // the shader keeps its 0.34-based thresholds
+const CANTHUS_R = 0.055; // rounded inner-corner notch, in units of W
+const CAM_Z = 9;
+const CAM_FOV = 18.2;
 
+// rounded cap at the inner corner (nx near +1); 0 elsewhere
+const innerCap = (nx: number) => {
+  const c = 1 - CANTHUS_R;
+  if (nx <= c) return 0;
+  const u = (nx - c) / CANTHUS_R;
+  return CANTHUS_R * W * Math.sqrt(Math.max(0, 1 - u * u));
+};
 const upperLid = (x: number) => {
   const nx = THREE.MathUtils.clamp(x / W, -1, 1);
   const b = 1 - nx * nx;
-  return 0.5 * Math.pow(b, 0.75) + 0.12 * nx * b;
+  return Math.max(0.5 * Math.pow(b, 0.75) + 0.12 * nx * b, innerCap(nx));
 };
 const lowerLid = (x: number) => {
   const nx = THREE.MathUtils.clamp(x / W, -1, 1);
   const b = 1 - nx * nx;
-  return -(0.34 * Math.pow(b, 1.1) - 0.05 * nx * b);
+  return Math.min(-(0.34 * Math.pow(b, 1.1) - 0.05 * nx * b), -innerCap(nx) * 0.75);
 };
 // outward normal of a lid curve, as an angle in the (sin a, cos a) convention (0 = straight up)
 const lidNormal = (lid: (x: number) => number, x: number, down: boolean) => {
@@ -54,8 +69,15 @@ float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int k = 0; k < 4; k++) { v += a
 
 const LID_GLSL = /* glsl */ `
 const float W = ${W.toFixed(3)};
-float upperLid(float x) { float nx = clamp(x / W, -1.0, 1.0); float b = 1.0 - nx * nx; return 0.5 * pow(b, 0.75) + 0.12 * nx * b; }
-float lowerLid(float x) { float nx = clamp(x / W, -1.0, 1.0); float b = 1.0 - nx * nx; return -(0.34 * pow(b, 1.1) - 0.05 * nx * b); }
+const float CR = ${CANTHUS_R.toFixed(3)};
+float innerCap(float nx) {
+  float c = 1.0 - CR;
+  if (nx <= c) return 0.0;
+  float u = (nx - c) / CR;
+  return CR * W * sqrt(max(0.0, 1.0 - u * u));
+}
+float upperLid(float x) { float nx = clamp(x / W, -1.0, 1.0); float b = 1.0 - nx * nx; return max(0.5 * pow(b, 0.75) + 0.12 * nx * b, innerCap(nx)); }
+float lowerLid(float x) { float nx = clamp(x / W, -1.0, 1.0); float b = 1.0 - nx * nx; return min(-(0.34 * pow(b, 1.1) - 0.05 * nx * b), -innerCap(nx) * 0.75); }
 `;
 
 const EYE_VERT = /* glsl */ `
@@ -70,6 +92,7 @@ void main() {
 const EYE_FRAG = /* glsl */ `
 uniform float uTime;
 uniform float uPupil;
+uniform float uAngScale;
 uniform vec3 uIrisA;
 uniform vec3 uIrisB;
 uniform vec3 uIrisC;
@@ -87,8 +110,8 @@ float vein(float t, float ang, float t0, float amp, float freq, float ph, float 
 }
 void main() {
   vec3 p = normalize(vPos);
-  float ang = acos(clamp(p.z, -1.0, 1.0));
-  float t = atan(p.y, p.x) / 6.2831853 + 0.5;
+  float ang = acos(clamp(p.z, -1.0, 1.0)) * uAngScale;
+  float t = atan(p.y, p.x) / 6.2831853 + 0.5;   // 0.5 = inner corner (+x), 0/1 = outer corner (-x)
   float r = ang / 0.34;
 
   vec3 sclera = vec3(0.96, 0.94, 0.95);
@@ -111,7 +134,12 @@ void main() {
   float capillary = smoothstep(0.84, 1.0, pnoise(vec2(t * 23.0, ang * 30.0), 23.0)) * smoothstep(0.5, 1.3, ang) * 0.25;
   v = clamp(v + capillary, 0.0, 1.0);
   sclera = mix(sclera, vec3(0.72, 0.14, 0.26), v * 0.6);
-  sclera *= 1.0 - 0.25 * smoothstep(0.6, 1.4, ang);
+  // the inner corner (+x): sclera turns fleshy pink and sits in shadow near the tear duct
+  float innerD = abs(t - 0.5);
+  float innerCorner = exp(-pow(innerD / 0.11, 2.0)) * smoothstep(0.5, 1.05, ang);
+  sclera = mix(sclera, vec3(0.88, 0.58, 0.62), innerCorner * 0.6);
+  sclera *= 1.0 - 0.28 * innerCorner;
+  sclera *= 1.0 - 0.2 * smoothstep(0.7, 1.5, ang);
 
   float fib = pnoise(vec2(t * 48.0, r * 5.0), 48.0) * 0.6 + pnoise(vec2(t * 140.0, r * 2.5 + uTime * 0.02), 140.0) * 0.4;
   vec3 iris = mix(uIrisA, uIrisB, smoothstep(0.05, 0.95, r));
@@ -127,7 +155,10 @@ void main() {
   col = mix(col, sclera, smoothstep(0.97, 1.06, r));
 
   float diff = 0.5 + 0.5 * max(dot(normalize(vNormal), normalize(vec3(0.4, 0.8, 1.0))), 0.0);
-  gl_FragColor = vec4(col * diff, 1.0);
+  col *= diff;
+  // far outside the aperture the eyeball must disappear into the painted face, not glow through it
+  col = mix(col, vec3(0.1, 0.025, 0.05), smoothstep(1.08, 1.35, ang));
+  gl_FragColor = vec4(col, 1.0);
 }`;
 
 const FACE_VERT = /* glsl */ `
@@ -161,19 +192,26 @@ void main() {
   float near = 1.0 - smoothstep(0.0, 0.9, -edge);
   skin += sp * vec3(1.0, 0.78, 0.86) * (0.25 + 0.6 * near);
 
+  // liner along the lid line: black, turning fleshy pink into the inner corner
   float liner = 1.0 - smoothstep(0.0, 0.1, -edge);
-  skin = mix(skin, vec3(0.02, 0.0, 0.015), liner * 0.92);
+  float innerX = smoothstep(0.55, 0.98, p.x / W);
+  vec3 linerCol = mix(vec3(0.02, 0.0, 0.015), vec3(0.6, 0.2, 0.28), innerX);
+  skin = mix(skin, linerCol, liner * 0.92);
   float crease = exp(-pow((p.y - (up + 0.24)) / 0.05, 2.0)) * step(abs(p.x), W * 1.05) * uOpen;
   skin = mix(skin, vec3(0.04, 0.0, 0.03), crease * 0.5);
 
   float rr = length(p * vec2(0.7, 1.0)) + (fbm(p * 1.8) - 0.5) * 0.7;
-  float faceA = 1.0 - smoothstep(1.05, 2.1, rr);
+  float faceA = 1.0 - smoothstep(1.75, 2.6, rr);
 
+  // inside the aperture: lid shadow on the eyeball plus a wet pink waterline along the lower lid
   float shadow = (1.0 - smoothstep(0.0, 0.17, up - p.y)) * 0.62;
   shadow += (1.0 - smoothstep(0.0, 0.06, p.y - lo)) * 0.25;
+  float waterline = (1.0 - smoothstep(0.0, 0.016, p.y - lo)) * uOpen;
+  vec3 insideCol = mix(vec3(0.02, 0.0, 0.015), vec3(0.86, 0.46, 0.54), waterline);
+  float insideA = max(min(shadow, 0.8), waterline * 0.6);
 
-  vec3 col = mix(skin, vec3(0.02, 0.0, 0.015), inside);
-  float a = mix(faceA, min(shadow, 0.8), inside);
+  vec3 col = mix(skin, insideCol, inside);
+  float a = mix(faceA, insideA, inside);
   gl_FragColor = vec4(col, a);
 }`;
 
@@ -379,7 +417,7 @@ function buildForest(detail: number): Forest {
   const rand = makeRng(4242);
   const addRoot = (r: Root) => roots.push(r) - 1;
 
-  // the five big limbs of the upper lid: inner sweep, tallest, top, outer, outer sweep
+  // the five big limbs of the upper lid: outer sweep, tallest, top, inner, inner sweep
   const giants: [number, number][] = [[-0.9, 0.8], [-0.45, 1.3], [-0.05, 1.05], [0.45, 1.0], [0.84, 0.85]];
   for (const [base, height] of giants) {
     const nx = base + (rand() - 0.5) * 0.05;
@@ -407,7 +445,7 @@ function buildForest(detail: number): Forest {
     growBranch(r, 0, 0, aOpen, height * 0.4, (medium ? 0.019 : 0.012) * (0.8 + 0.4 * rand()), medium ? 4 : 2, st, f, rand);
   }
 
-  // lower lid: shorter trees hanging down and out; sparser toward the outer corner where the tears run
+  // lower lid: shorter trees hanging down and out; sparser toward the inner corner where the tears run
   const nLower = Math.round(40 * detail);
   for (let i = 0; i < nLower; i++) {
     const u = (i + 0.5) / nLower;
@@ -423,8 +461,8 @@ function buildForest(detail: number): Forest {
     growBranch(r, 0, 0, aOpen, height * 0.4, (big ? 0.02 : 0.011) * (0.8 + 0.4 * rand()), big ? 4 : 2, st, f, rand);
   }
 
-  // crystallised tears: beads, short runs, medium runs and long oozes, all near the outer corner
-  const tearPlan: [number, 0 | 1 | 2 | 3][] = [[0.4, 1], [0.47, 0], [0.53, 3], [0.6, 2], [0.68, 0], [0.74, 3], [0.8, 1], [0.86, 2], [0.92, 3], [0.96, 1]];
+  // crystallised tears: beads, short runs, medium runs and long oozes, draining from the inner corner
+  const tearPlan: [number, 0 | 1 | 2 | 3][] = [[0.4, 1], [0.47, 0], [0.53, 3], [0.6, 2], [0.68, 0], [0.74, 3], [0.8, 1], [0.86, 2], [0.91, 3]];
   for (const [base, kind] of tearPlan) {
     if (detail < 1 && kind === 0 && rand() < 0.5) continue;
     const nx = base + (rand() - 0.5) * 0.03;
@@ -656,7 +694,7 @@ function Forest({ openRef, detail }: { openRef: React.MutableRefObject<number>; 
 
 /* ---------- the eye ---------------------------------------------------------------------- */
 
-function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: number; reduced: boolean; detail: number }) {
+function EyeRig({ scale, reduced, detail }: { scale: number; reduced: boolean; detail: number }) {
   const eye = useRef<THREE.Group>(null!);
   const scan = useRef<THREE.Mesh>(null!);
   const scanGlow = useRef<THREE.Mesh>(null!);
@@ -672,6 +710,7 @@ function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: n
         uniforms: {
           uTime: { value: 0 },
           uPupil: { value: 0.36 },
+          uAngScale: { value: ANG_SCALE },
           uIrisA: { value: new THREE.Color("#ff8fb3") },
           uIrisB: { value: new THREE.Color("#4a1a6b") },
           uIrisC: { value: new THREE.Color("#ffe3ee") },
@@ -730,7 +769,7 @@ function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: n
   });
 
   return (
-    <group position={[offsetX, -0.1, 0]} scale={scale}>
+    <group position={[0, -0.22, 0]} scale={scale}>
       <group ref={eye}>
         <mesh material={eyeMat}>
           <sphereGeometry args={[Z_EYE_R, 128, 128]} />
@@ -739,8 +778,8 @@ function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: n
           <sphereGeometry args={[Z_EYE_R + 0.02, 96, 96]} />
           <meshPhysicalMaterial color="#ffffff" transparent opacity={0.14} roughness={0.03} metalness={0} clearcoat={1} clearcoatRoughness={0.02} depthWrite={false} />
         </mesh>
-        <mesh ref={ring} position={[0, 0, Z_EYE_R * Math.cos(0.34) + 0.004]}>
-          <torusGeometry args={[Z_EYE_R * Math.sin(0.34), 0.004, 8, 128]} />
+        <mesh ref={ring} position={[0, 0, Z_EYE_R * Math.cos(IRIS_T) + 0.004]}>
+          <torusGeometry args={[Z_EYE_R * Math.sin(IRIS_T), 0.004, 8, 128]} />
           <meshBasicMaterial color="#ff2e6e" transparent opacity={0.45} blending={THREE.AdditiveBlending} depthWrite={false} />
         </mesh>
         <mesh ref={scan}>
@@ -770,6 +809,19 @@ function EyeRig({ offsetX, scale, reduced, detail }: { offsetX: number; scale: n
   );
 }
 
+/* Lens shift: the camera looks straight at the eye (no corner distortion) while the frame is
+   slid so the eye sits `shift` of the canvas width to the right of centre. */
+function Framing({ shift }: { shift: number }) {
+  const { camera, size } = useThree();
+  useEffect(() => {
+    const cam = camera as THREE.PerspectiveCamera;
+    if (shift) cam.setViewOffset(size.width, size.height, -shift * size.width, 0, size.width, size.height);
+    else cam.clearViewOffset();
+    cam.updateProjectionMatrix();
+  }, [camera, size, shift]);
+  return null;
+}
+
 export default function EyeScene() {
   const reduced = useMedia("(prefers-reduced-motion: reduce)");
   const narrow = useMedia("(max-width: 820px)");
@@ -782,8 +834,9 @@ export default function EyeScene() {
     return () => window.removeEventListener("pointermove", on);
   }, []);
   return (
-    <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, 6], fov: 30 }} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
-      <EyeRig offsetX={narrow ? 0 : 1.05} scale={narrow ? 0.6 : 1} reduced={reduced} detail={narrow ? 0.6 : 1} />
+    <Canvas dpr={[1, 1.5]} camera={{ position: [0, 0, CAM_Z], fov: CAM_FOV }} gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}>
+      <Framing shift={narrow ? 0 : 0.225} />
+      <EyeRig scale={narrow ? 0.6 : 0.94} reduced={reduced} detail={narrow ? 0.6 : 1} />
     </Canvas>
   );
 }
