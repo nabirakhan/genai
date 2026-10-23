@@ -1,4 +1,4 @@
-"""Single source of truth for on-disk locations.
+r"""Single source of truth for on-disk locations.
 
 Data lives outside the repo under GENAI_DATA (env var). Defaults:
   Windows: C:\genai-data   (lab PC: fast SSD)   -- laptop: set GENAI_DATA=E:\genai-data

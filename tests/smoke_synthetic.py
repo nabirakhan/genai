@@ -83,7 +83,7 @@ def main() -> None:
     run([py, "-m", "src.data.prepare_images", "--source", "both", "--workers", "2"], env)
     assert len(list((data / "aptos256").glob("*.png"))) == N_APTOS
     assert len(list((data / "idrid256").glob("*.png"))) == 12
-    run([py, "-m", "src.data.dedup", "--threshold", "4"], env)
+    run([py, "-m", "src.data.dedup"], env)
     dropped = pd.read_csv(splits / "aptos_dedup_dropped.csv")
     assert "img001" in set(dropped.dropped_id), dropped
     run([py, "-m", "src.data.split"], env)

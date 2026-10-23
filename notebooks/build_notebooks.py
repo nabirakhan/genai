@@ -280,7 +280,7 @@ sh([sys.executable, "-m", "src.data.dedup_audit", "--out", f"{OUT}/audit"])'''),
     ("code", '''from IPython.display import Image as IImage, display
 print(open(f"{OUT}/audit/summary.txt").read())
 display(IImage(f"{OUT}/audit/sheet_phash_pairs.png"))
-display(IImage(f"{OUT}/audit/sheet_top_corr.png"))
+display(IImage(f"{OUT}/audit/sheet_other_candidates.png"))
 os.chdir(WORK)
 shutil.rmtree(DATA, ignore_errors=True)
 shutil.rmtree(CODE, ignore_errors=True)'''),

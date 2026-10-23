@@ -70,7 +70,7 @@ python -m src.data.split          # writes splits/aptos_splits.csv, prints grade
 git add splits && git commit -m "Add APTOS dedup list, splits and IDRiD labels" && git push
 ```
 
-Expected: a few dozen duplicates dropped; train share per grade ≈ 0.70; fractions nested (asserted). These CSVs are the single source of truth for every machine; never regenerate them with a different seed.
+Expected: about 140 duplicate copies dropped plus about 40 originals whose copies carry a different grade (≈3,480 images remain); train share per grade ≈ 0.70; fractions nested (asserted). These CSVs are the single source of truth for every machine; never regenerate them with a different seed.
 
 ## S5 Cache (~1 min)
 

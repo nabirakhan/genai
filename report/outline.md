@@ -7,7 +7,7 @@ the scripts in `report/figures.md`.
 2. **Introduction** – rare severe DR; why GAN augmentation claims are weak (weak baselines, in-distribution tests, no data-size / ratio axis); contributions.
 3. **Related work** – StyleGAN2 / ADA [1,2]; GAN augmentation for fundus images; FID limits for retinal images [3]; RandAugment [9], mixup [10]; fairness / pigmentation [4,5].
 4. **Method**
-   4.1 Data: APTOS 2019, crop/resize, pHash dedup (n dropped), stratified 70/15/15, nested rare-grade fractions (table of counts), IDRiD external test (516).
+   4.1 Data: APTOS 2019, crop/resize, duplicate removal (vessel correlation; why pHash failed, n dropped, grade conflicts), stratified 70/15/15, nested rare-grade fractions (table of counts), IDRiD external test (516).
    4.2 Generator: class-conditional StyleGAN2-ADA, transfer from FFHQ-256, shape-tolerant resume (fc0 / cmap), training budget per GAN, ADA target, truncation 0.8.
    4.3 Classifier and conditions: EfficientNet-B0 at 256 px, optimiser, early stopping on val QWK, the six conditions, synthetic ratio definition, 3 seeds.
    4.4 Evaluation: macro F1, QWK, recall 3/4; bootstrap CIs; paired comparison (6) vs (5); IDRiD without retraining.

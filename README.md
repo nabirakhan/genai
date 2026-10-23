@@ -14,7 +14,7 @@ the answer changes with the amount of real rare-grade data (10/25/50/100%) and t
 
 | path | what |
 |---|---|
-| `src/data/` | APTOS download, fundus crop to 256px, pHash dedup, stratified split + nested fractions, uint8 cache, stylegan3 zips, Kaggle dataset upload |
+| `src/data/` | APTOS download, fundus crop to 256px, duplicate removal (vessel-pattern correlation), stratified split + nested fractions, uint8 cache, stylegan3 zips, Kaggle dataset upload |
 | `src/classify/` | EfficientNet-B0 classifier: 6 conditions, `train.py` (resumable), `queue.py` (84 runs) |
 | `src/gan/` | generation, per-class FID/KID, synthetic-image metadata/watermark, import from Kaggle |
 | `src/analysis/` | tables, bootstrap CIs, learning curves, fraction x ratio map, memorisation check, RPS, Grad-CAM |

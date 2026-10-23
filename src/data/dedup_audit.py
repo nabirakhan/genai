@@ -19,59 +19,11 @@ import pandas as pd
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
-from src.data.dedup import UnionFind, hamming_rows, phash_u64
+from src.data.dedup import (MASK, UnionFind, aligned_corr, greedy_drop, hamming_rows, phash_u64, unit,
+                            vessel_field)
 from src.genai.paths import APTOS256, RAW_APTOS
 
-FIELD = 128
-MAX_SHIFT = 3
 BINS = [(0.95, 1.01), (0.9, 0.95), (0.85, 0.9), (0.8, 0.85), (0.7, 0.8), (-1, 0.7)]
-
-
-def disc_mask(size: int, frac: float) -> np.ndarray:
-    yy, xx = np.mgrid[0:size, 0:size]
-    c = (size - 1) / 2
-    return (xx - c) ** 2 + (yy - c) ** 2 <= (frac * size) ** 2
-
-
-MASK = disc_mask(FIELD, 0.42)
-_CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-
-
-def vessel_field(path) -> np.ndarray:
-    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    g = cv2.GaussianBlur(bgr[:, :, 1], (0, 0), 1.0)
-    g = _CLAHE.apply(g)
-    return cv2.resize(g, (FIELD, FIELD), interpolation=cv2.INTER_AREA).astype(np.float32)
-
-
-def unit(v: np.ndarray) -> np.ndarray:
-    v = v - v.mean(axis=-1, keepdims=True)
-    return v / (np.linalg.norm(v, axis=-1, keepdims=True) + 1e-6)
-
-
-def aligned_corr(fa: np.ndarray, fb: np.ndarray, max_shift: int = MAX_SHIFT) -> float:
-    a = unit(fa[MASK])
-    shifted = np.stack([np.roll(fb, (dy, dx), axis=(0, 1))[MASK]
-                        for dy in range(-max_shift, max_shift + 1) for dx in range(-max_shift, max_shift + 1)])
-    return float((unit(shifted) @ a).max())
-
-
-def greedy_drop(n: int, pairs: dict[tuple[int, int], float], thr: float) -> np.ndarray:
-    """Keep images in index order; drop one if it matches an already-kept image (no chaining)."""
-    nbrs: dict[int, list[tuple[int, float]]] = {}
-    for (i, j), s in pairs.items():
-        if s >= thr:
-            nbrs.setdefault(i, []).append((j, s))
-            nbrs.setdefault(j, []).append((i, s))
-    kept = np.zeros(n, bool)
-    dup_of = np.full(n, -1)
-    for i in range(n):
-        m = [(j, s) for j, s in nbrs.get(i, []) if kept[j]]
-        if m:
-            dup_of[i] = max(m, key=lambda t: t[1])[0]
-        else:
-            kept[i] = True
-    return dup_of
 
 
 def thumb(path, px: int) -> Image.Image:
