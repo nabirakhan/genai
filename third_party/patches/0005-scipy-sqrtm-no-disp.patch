@@ -1,0 +1,13 @@
+diff --git a/metrics/frechet_inception_distance.py b/metrics/frechet_inception_distance.py
+index 7d5231c..89876dc 100644
+--- a/metrics/frechet_inception_distance.py
++++ b/metrics/frechet_inception_distance.py
+@@ -34,7 +34,7 @@ def compute_fid(opts, max_real, num_gen):
+         return float('nan')
+ 
+     m = np.square(mu_gen - mu_real).sum()
+-    s, _ = scipy.linalg.sqrtm(np.dot(sigma_gen, sigma_real), disp=False) # pylint: disable=no-member
++    s = scipy.linalg.sqrtm(np.dot(sigma_gen, sigma_real)) # pylint: disable=no-member # SciPy >= 1.18 removed disp
+     fid = np.real(m + np.trace(sigma_gen + sigma_real - s * 2))
+     return float(fid)
+ 

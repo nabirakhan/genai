@@ -98,12 +98,15 @@ def recall_bars(df: pd.DataFrame, dataset: str, frac: float, out: Path) -> None:
 
 
 def gan_kid(gan_csv: Path, out: Path) -> None:
-    g = pd.read_csv(gan_csv)
+    g = pd.read_csv(gan_csv, dtype={"grade": str})
+    g = g[g.grade.isin(["3", "4"])]                     # per-class rows; overall FID/KID rows are grade "all"
+    gans = sorted(g.gan.unique())
+    x = {name: i for i, name in enumerate(gans)}
     fig, ax = plt.subplots(figsize=(5, 3))
     for grade, grp in g.groupby("grade"):
-        ax.bar(np.arange(len(grp)) + (0.4 if grade == 4 else 0), grp.kid, 0.4, yerr=grp.kid_std, capsize=2,
+        ax.bar([x[n] + (0.4 if grade == "4" else 0) for n in grp.gan], grp.kid, 0.4, yerr=grp.kid_std, capsize=2,
                label=f"grade {grade}")
-        ax.set_xticks(np.arange(len(grp)) + 0.2, grp.gan, rotation=20)
+    ax.set_xticks(np.arange(len(gans)) + 0.2, gans, rotation=20)
     ax.set_ylabel("KID (lower is better)")
     ax.set_title("GAN quality per rare grade vs held-out val images")
     ax.legend(frameon=False)

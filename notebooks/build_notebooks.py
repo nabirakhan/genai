@@ -75,37 +75,35 @@ if r.returncode == 4:
 EVAL_CELLS = [
     ("markdown", """# GAN evaluation + image generation (Kaggle T4 x2)
 
-Inputs: the train notebook's outputs (one per FRACTION/AUG) and the dataset `aptos-dr-256-genai`.
-Per final pickle: 500 images per rare grade (seeds 0-499, psi 0.8) with `Synthetic=true` metadata,
-overall FID/KID vs the val split (`calc_metrics.py`), per-class KID for grades 3/4
-(`src/gan/metrics_per_class.py`). Outputs: `synth_{tag}.zip`, `gan_metrics.csv`, `samples_{tag}.png`.
-Download on the lab PC with `kaggle kernels output <user>/<this-notebook> -p downloads/` then
-`python -m src.gan.import_synth downloads/synth_f*.zip`."""),
+Inputs: the **newest output of genai-gan-train** (its `final/<tag>_kimg<N>.pkl` hold every finished GAN) and the
+**genai-data-prep output** whose split equals the committed one (its val zip is the FID/KID reference).
+Per GAN at the session kimg budget: 500 images per rare grade (seeds 0-499, psi 0.8) with `Synthetic=true`
+metadata, overall FID/KID vs the val split (`calc_metrics.py`) and per-class FID/KID for grades 3/4
+(`src/gan/metrics_per_class.py`). Outputs: `synth_<tag>.zip`, `gan_metrics.csv`, `samples_<tag>.png`, `pkls/<tag>.pkl`.
+Lab PC: `kaggle kernels output <user>/<this-notebook> -p downloads/`, then `python -m src.gan.import_synth downloads/synth_f*.zip`."""),
     ("code", f'''REPO = "{REPO_URL}"
-DATASET_DIR = "/kaggle/input/aptos-dr-256-genai"
 N_PER_CLASS, PSI, CLASSES = 500, 0.8, "3,4"
-ONLY_TAGS = None          # e.g. ["f100-ada"]; None = every tag found under /kaggle/input
+ONLY_TAGS = None          # e.g. ["f100-ada"]; None = every GAN that reached the session kimg budget
 GPUS = 2'''),
     ("code", SETUP),
-    ("code", '''def total_kimg(path):
-    m = re.search(r"-from(\\d+)[/\\\\].*snapshot-(\\d+)", path); return int(m.group(1)) + int(m.group(2)) if m else 0
-best = {}
-for s in glob.glob("/kaggle/input/**/network-snapshot-*.pkl", recursive=True):
-    m = re.search(r"-(f\\d{3}-(?:ada|noaug))-from", s)
-    if m and (ONLY_TAGS is None or m.group(1) in ONLY_TAGS):
-        if m.group(1) not in best or total_kimg(s) > total_kimg(best[m.group(1)]):
-            best[m.group(1)] = s
+    ("code", '''from pathlib import Path
+from src.gan.kaggle_train import scan, find_zip, committed_split
+KIMG = int(json.load(open("notebooks/kaggle_session.json"))["kimg"])     # same budget for every GAN
+best, _ = scan([Path("/kaggle/input")])
 os.makedirs(f"{WORK}/pkls", exist_ok=True)
 PKLS = {}
-for tag, s in sorted(best.items()):
+for tag, (total, src) in sorted(best.items()):
+    if ONLY_TAGS is not None and tag not in ONLY_TAGS:
+        continue
+    if total < KIMG:
+        print(f"skip {tag}: {total} < {KIMG} kimg (still training)"); continue
     dst = f"{WORK}/pkls/{tag}.pkl"           # copy: calc_metrics must not write next to a read-only input
-    if not os.path.exists(dst): shutil.copy(s, dst)
-    PKLS[tag] = dst; print(f"{tag}: {total_kimg(s)} kimg  <- {s}")
-assert PKLS, "no snapshots found; attach the train notebook outputs"
-vals = sorted(glob.glob("/kaggle/input/**/aptos256_val.zip", recursive=True)) + sorted(glob.glob("/kaggle/input/**/aptos256_val", recursive=True))
-assert vals, "aptos256_val not found under /kaggle/input: add the data-prep notebook output or the dataset as input"
-REAL_VAL = vals[0]
-print("REAL_VAL =", REAL_VAL)'''),
+    if not os.path.exists(dst): shutil.copy(src, dst)
+    PKLS[tag] = dst; print(f"{tag}: {total} kimg  <- {src}")
+assert PKLS, f"no GAN at {KIMG} kimg found; attach the newest genai-gan-train output"
+val, why = find_zip("val", [Path("/kaggle/input")], committed_split())
+assert val is not None, why
+REAL_VAL = str(val); print("REAL_VAL =", REAL_VAL, f"({why})")'''),
     ("code", '''import pandas as pd
 overall = []
 for tag, pkl in PKLS.items():
@@ -113,14 +111,17 @@ for tag, pkl in PKLS.items():
     sh([sys.executable, "-m", "src.gan.generate", "--pkl", pkl, "--outdir", out, "--classes", CLASSES, "--n", str(N_PER_CLASS), "--psi", str(PSI), "--tag", tag])
     r = subprocess.run([sys.executable, "third_party/stylegan3/calc_metrics.py", "--metrics=fid50k_full,kid50k_full", f"--network={pkl}", f"--data={REAL_VAL}", f"--gpus={GPUS}"], capture_output=True, text=True)
     print(r.stdout[-1500:], r.stderr[-800:])
-    for line in r.stdout.splitlines():
+    res = {}
+    for line in r.stdout.splitlines():                 # calc_metrics prints one JSON line per metric
         if line.startswith("{") and '"results"' in line:
-            res = json.loads(line)["results"]
-            overall.append(dict(gan=tag, grade="all", n_real=None, n_gen=50000, fid=res.get("fid50k_full"), kid=res.get("kid50k_full"), kid_std=None))
+            res.update(json.loads(line)["results"])
+    if r.returncode or not res:
+        print(f"WARNING: calc_metrics failed for {tag} (exit {r.returncode})")
+    overall.append(dict(gan=tag, grade="all", n_real=None, n_gen=50000, fid=res.get("fid50k_full"), kid=res.get("kid50k_full"), kid_std=None))
     sh([sys.executable, "-m", "src.gan.metrics_per_class", "--gan", tag, "--synth-dir", out, "--real", REAL_VAL, "--classes", CLASSES, "--out", f"{WORK}/gan_metrics.csv"])
     shutil.make_archive(out, "zip", out)
-df = pd.read_csv(f"{WORK}/gan_metrics.csv")
-df = pd.concat([df[df.grade.astype(str) != "all"], pd.DataFrame(overall)], ignore_index=True)
+df = pd.read_csv(f"{WORK}/gan_metrics.csv", dtype={"grade": str})
+df = pd.concat([df[df.grade != "all"], pd.DataFrame(overall)], ignore_index=True)
 df.to_csv(f"{WORK}/gan_metrics.csv", index=False); print(df.to_string(index=False))'''),
     ("code", '''import numpy as np
 from PIL import Image

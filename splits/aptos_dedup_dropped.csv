@@ -1,0 +1,179 @@
+dropped_id,kept_id,score,reason
+0243404e8a00,,,grade conflict among copies
+0ac436400db4,,,grade conflict among copies
+0cb14014117d,,,grade conflict among copies
+14e3f84445f7,,,grade conflict among copies
+1632c4311fc9,,,grade conflict among copies
+16ce555748d8,,,grade conflict among copies
+19e350c7c83c,19722bff5a09,1.0,duplicate
+1c4d87baaffc,,,grade conflict among copies
+1c9c583c10bf,,,grade conflict among copies
+1e143fa3de57,144b01e7b993,1.0,duplicate
+1f07dae3cadb,012a242ac6ff,1.0,duplicate
+278aa860dffd,,,grade conflict among copies
+2b21d293fdf2,2a3a1ed1c285,1.0,duplicate
+2c2aa057afc5,135575dc57c9,1.0,duplicate
+2df07eb5779f,,,grade conflict among copies
+2f284b6a1940,,,grade conflict among copies
+2f7789c1e046,,,grade conflict among copies
+3044022c6969,04ac765f91a1,1.0,duplicate
+30cab14951ac,,,grade conflict among copies
+33105f9b3a04,111898ab463d,1.0,duplicate
+33778d136069,,,grade conflict among copies
+3435fd8675a2,,,grade conflict among copies
+35aa7f5c2ec0,1c4d87baaffc,1.0,duplicate
+36ec36c301c1,26e231747848,1.0,duplicate
+38fe9f854046,1dfbede13143,1.0,duplicate
+3b018e8b7303,0243404e8a00,0.9996,duplicate
+3c53198519f7,1c5e6cdc7ee1,1.0,duplicate
+3ca637fddd56,3b4a5fcbe5e0,1.0,duplicate
+3cd801ffdbf0,,,grade conflict among copies
+3dbfbc11e105,,,grade conflict among copies
+3ddb86eb530e,0243404e8a00,0.9996,duplicate
+3e86335bc2fd,0c7e82daf5a0,1.0,duplicate
+3ee4841936ef,,,grade conflict among copies
+42985aa2e32f,,,grade conflict among copies
+42a850acd2ac,,,grade conflict among copies
+435d900fa7b2,1006345f70b7,1.0,duplicate
+46cdc8b685bd,,,grade conflict among copies
+4a44cc840ebe,0cb14014117d,1.0,duplicate
+4ccfa0b4e96c,33778d136069,0.9999,duplicate
+4d9fc85a8259,16ce555748d8,0.9999,duplicate
+4fecf87184e6,,,grade conflict among copies
+51131b48f9d4,42a850acd2ac,1.0,duplicate
+521d3e264d71,,,grade conflict among copies
+576e189d23d4,1638404f385c,1.0,duplicate
+595446774178,36041171f441,1.0,duplicate
+5a36cea278ae,1ae8c165fd53,1.0,duplicate
+5e7db41b3bee,,,grade conflict among copies
+5eb311bcb5f9,,,grade conflict among copies
+60f15dd68d30,,,grade conflict among copies
+6165081b9021,42985aa2e32f,1.0,duplicate
+6253f23229b1,,,grade conflict among copies
+63a03880939c,05a5183c92d0,1.0,duplicate
+65c958379680,11242a67122d,1.0,duplicate
+6b00cb764237,64678182d8a8,1.0,duplicate
+6cb98da77e3e,48c49f662f7d,1.0,duplicate
+7005be54cab1,3ee4841936ef,1.0,duplicate
+7525ebb3434d,3cd801ffdbf0,1.0,duplicate
+76cfe8967f7d,6253f23229b1,1.0,duplicate
+772af553b8b7,60f15dd68d30,0.9997,duplicate
+77a9538b8362,40e9b5630438,1.0,duplicate
+79ce83c07588,71c1a3cdbe47,1.0,duplicate
+7bf981d9c7fe,36677b70b1ef,1.0,duplicate
+80964d8e0863,,,grade conflict among copies
+81b0a2651c45,07419eddd6be,1.0,duplicate
+8446826853d0,,,grade conflict among copies
+857002ed4e49,840527bc6628,1.0,duplicate
+8688f3d0fcaf,,,grade conflict among copies
+86b3a7929bec,1b4625877527,1.0,duplicate
+86baef833ae0,7a0cff4c24b2,1.0,duplicate
+878a3a097436,80feb1f7ca5e,1.0,duplicate
+8a759f94613a,2cceb07ff706,1.0,duplicate
+8acffaf1f4b9,1411c8ab7161,1.0,duplicate
+8cb6b0efaaac,42a850acd2ac,1.0,duplicate
+8d7bb0649a02,7550966ef777,1.0,duplicate
+8ef2eb8c51c4,8446826853d0,1.0,duplicate
+91b6ebaa3678,7e160c8b611e,1.0,duplicate
+91cbe1c775ef,7d261f986bef,1.0,duplicate
+92b0d27fc0ec,1a1b4b2450ca,1.0,duplicate
+94372043d55b,0dce95217626,1.0,duplicate
+94b1d8ad35ec,4d7d6928534a,1.0,duplicate
+98104c8c67eb,75a7bc945b7d,1.0,duplicate
+98e8adcf085c,026dcd9af143,1.0,duplicate
+98f7136d2e7a,,,grade conflict among copies
+9a3c03a5ad0f,,,grade conflict among copies
+9a94e0316ee3,2b48daf24be0,0.9999,duplicate
+9bf060db8376,4fecf87184e6,1.0,duplicate
+9c52b87d01f1,6e92b1c5ac8e,1.0,duplicate
+9e3510963315,,,grade conflict among copies
+9f4132bd6ed6,9b7b6e4db1d5,1.0,duplicate
+a15652b22ab8,9b32e8ef0ca0,1.0,duplicate
+a19507501b40,3a1d3ce00f0c,1.0,duplicate
+a1b12fdce6c3,5e7db41b3bee,1.0,duplicate
+a3b2e93d058b,3fd7df6099e3,1.0,duplicate
+a4012932e18d,906d02fb822d,1.0,duplicate
+a47432cd41e7,1e8a1fdee5b9,1.0,duplicate
+a56230242a95,1c6d119c3d70,1.0,duplicate
+a75bab2463d4,1632c4311fc9,1.0,duplicate
+a7b0d0c51731,1cb814ed6332,1.0,duplicate
+a8582e346df0,7a3ea1779b13,1.0,duplicate
+a8e88d4891c4,2f7789c1e046,1.0,duplicate
+a9e984b57556,5eb311bcb5f9,1.0,duplicate
+ab50123abadb,80964d8e0863,1.0,duplicate
+b187b3c93afb,9e3510963315,1.0,duplicate
+b376def52ccc,38487e1a5b1f,1.0,duplicate
+b8ebedd382de,1e8a1fdee5b9,1.0,duplicate
+b9127e38d9b9,,,grade conflict among copies
+b91ef82e723a,2df07eb5779f,1.0,duplicate
+ba2624883599,14515b8f19b6,1.0,duplicate
+bacfb1029f6b,,,grade conflict among copies
+badb5ff8d3c7,2923971566fe,1.0,duplicate
+bb5083fae98f,2f284b6a1940,0.9999,duplicate
+bd5013540a13,22895c89792f,1.0,duplicate
+be161517d3ac,9b418ce42c13,1.0,duplicate
+bfefa7344e7d,8688f3d0fcaf,0.9997,duplicate
+c027e5482e8c,7a3ea1779b13,1.0,duplicate
+c05b7b4c22fe,aca88f566228,1.0,duplicate
+c0e509786f7f,aeed1f251ceb,1.0,duplicate
+c1c8550508e0,530d78467615,1.0,duplicate
+c2d2b4f536da,1ee1eb7943db,1.0,duplicate
+c546670d9684,30cab14951ac,1.0,duplicate
+c62585bd68fb,3435fd8675a2,0.9999,duplicate
+c68dfa021d62,4ce74e5eb51d,1.0,duplicate
+c8d2d32f7f29,034cb07a550f,1.0,duplicate
+c9f0dc2c8b43,9c5dd3612f0c,1.0,duplicate
+ca25745942b0,00cb6555d108,1.0,duplicate
+ca6842bfcbc9,7a3ea1779b13,1.0,duplicate
+cac40227d3b2,0161338f53cc,1.0,duplicate
+cc12453ea915,65e51e18242b,1.0,duplicate
+cd4e7f9fa1a9,9f1efb799b7b,1.0,duplicate
+cd93a472e5cd,,,grade conflict among copies
+d0079cc188e9,3dbfbc11e105,1.0,duplicate
+d035c2bd9104,cd93a472e5cd,0.9997,duplicate
+d144144a2f3f,b06dabab4f09,1.0,duplicate
+d1cad012a254,8fc09fecd22f,1.0,duplicate
+d51c2153d151,7b691d9ced34,1.0,duplicate
+d567a1a22d33,12e3f5f2cb17,1.0,duplicate
+d801c0a66738,68332fdcaa70,1.0,duplicate
+d81b6ed83bc2,cd3fd04d72f5,1.0,duplicate
+d85ea1220a03,8688f3d0fcaf,0.9997,duplicate
+d994203deb64,a505981d1cab,1.0,duplicate
+da0a1043abf7,b13d72ceea26,1.0,duplicate
+dc3c0d8ee20b,ca891d37a43c,1.0,duplicate
+df4913ca3712,d51b3fe0fa1b,1.0,duplicate
+e037643244b7,5b76117c4bcb,1.0,duplicate
+e12d41e7b221,bacfb1029f6b,1.0,duplicate
+e1fb532f55df,b019a49787c1,0.9999,duplicate
+e2c3b037413b,a8b637abd96b,1.0,duplicate
+e39b627cf648,b9127e38d9b9,1.0,duplicate
+e4151feb8443,46cdc8b685bd,1.0,duplicate
+e4e343eaae2a,43fb6eda9b97,1.0,duplicate
+e540d2e35d15,b0d6417bad3e,0.9016,duplicate
+e740af6ac6ea,98f7136d2e7a,1.0,duplicate
+e76a9cbb2a8c,bb7e0a2544cd,1.0,duplicate
+e7a7187066ad,ce887b196c23,1.0,duplicate
+e8d1c6c07cf2,,,grade conflict among copies
+ea05c22d92e9,ca0f1a17c8e5,1.0,duplicate
+ea15a290eb96,1c9c583c10bf,1.0,duplicate
+ea9e0fb6fb0b,23d7ca170bdb,1.0,duplicate
+eadc57064154,6c3745a222da,1.0,duplicate
+ed3a0fc5b546,ba735b286d62,1.0,duplicate
+ed6704e3b72e,51269b77d312,0.9526,duplicate
+ee2c2a5f7d0e,7877be80901c,1.0,duplicate
+f03d3c4ce7fb,9a3c03a5ad0f,1.0,duplicate
+f066db7a2efe,278aa860dffd,1.0,duplicate
+f0f89314e860,14e3f84445f7,1.0,duplicate
+f23902998c21,e8d1c6c07cf2,1.0,duplicate
+f4d3777f2710,5dc23e440de3,1.0,duplicate
+f6f3ea0d2693,1e9224ccca95,1.0,duplicate
+f7edc074f06b,4fecf87184e6,1.0,duplicate
+f920ccd926db,bcdc8db5423b,1.0,duplicate
+f9e1c439d4c8,3f44d749cd0b,1.0,duplicate
+f9ecf1795804,d28bd830c171,1.0,duplicate
+fcc6aa6755e6,60f15dd68d30,1.0,duplicate
+fda39982a810,0ac436400db4,1.0,duplicate
+fe0fc67c7980,521d3e264d71,1.0,duplicate
+fea14b3d44b0,80d24897669f,1.0,duplicate
+ff0740cb484a,b8ac328009e0,1.0,duplicate
+ff52392372d3,f1a761c68559,1.0,duplicate

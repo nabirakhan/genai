@@ -55,7 +55,7 @@ def fid(fr: np.ndarray, fg: np.ndarray) -> float:
     mu_r, mu_g = fr.mean(0), fg.mean(0)
     s_r, s_g = np.cov(fr, rowvar=False), np.cov(fg, rowvar=False)
     m = np.square(mu_g - mu_r).sum()
-    s, _ = scipy.linalg.sqrtm(np.dot(s_g, s_r), disp=False)
+    s = scipy.linalg.sqrtm(np.dot(s_g, s_r))  # SciPy >= 1.18 removed disp; without it every version returns the matrix only
     return float(np.real(m + np.trace(s_g + s_r - s * 2)))
 
 

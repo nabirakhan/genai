@@ -63,6 +63,19 @@ forward plus the double backward that R1 needs on PyTorch 2.14 (CPU).
 
 **Verification.** All four patches apply with `git apply` to a pristine LF checkout of the pinned commit.
 
+## 0005-scipy-sqrtm-no-disp.patch
+
+**Problem.** `metrics/frechet_inception_distance.py` calls `scipy.linalg.sqrtm(..., disp=False)` and
+unpacks two values. SciPy 1.18 (June 2026, Python >= 3.12) removed `disp`, so FID raises
+`TypeError: sqrtm() got an unexpected keyword argument 'disp'` after all features are computed.
+Kaggle currently ships SciPy 1.16.3 (works with a DeprecationWarning), so the bug is latent until
+the image or a dependency upgrades SciPy. `src/gan/metrics_per_class.py` had the same call.
+
+**Change.** `s = scipy.linalg.sqrtm(...)`: without `disp`, every SciPy version returns the matrix only.
+
+**Verification.** Reproduced the TypeError with the SciPy 1.18.1 cp313 wheel; the patched function
+returns the same FID as the original on SciPy 1.16.3 and 1.17.1.
+
 ## Not patched (checked)
 
 - `torch_utils/ops/grid_sample_gradfix.py` already handles PyTorch >= 1.12 (`op[0]`), so ADA runs

@@ -74,7 +74,7 @@ python -m src.data.split          # joins grades from raw\aptos\train.csv and ve
 git add splits\idrid_test.csv && git commit -m "Add IDRiD test labels" && git push   # written by S3; CC BY 4.0, fine to commit
 ```
 
-Expected: `verified against train.csv, not regenerating`, 3,484 rows, and these train counts:
+Expected: `verified against train.csv, not regenerating`, 3,484 rows, digest `017b5a96eb9b`, and these train counts:
 f100 `{0: 1257, 1: 236, 2: 644, 3: 116, 4: 185}`; f010 keeps 12 / 19 of grades 3 / 4, f025 29 / 47, f050 58 / 93.
 Do not run `src.data.dedup` or `split --force` here: a re-run on different crops could shift a
 borderline pair and silently move test images into the GAN's training set.
