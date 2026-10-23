@@ -211,7 +211,7 @@ Output (`/kaggle/working/out`): `splits/aptos_dedup_dropped.csv`, `splits/aptos_
 Then in the GAN notebooks use **Add Input → Your Work → this notebook** (its output is searched automatically).
 Download `splits/*.csv` and commit them to the repo so every machine uses the same split."""),
     ("code", f'''REPO = "{REPO_URL}"
-APTOS_INPUT = "/kaggle/input/aptos2019-blindness-detection"
+APTOS_INPUT = "auto"      # "auto" finds the folder holding train.csv + train_images under /kaggle/input
 IDRID_INPUT = ""          # e.g. "/kaggle/input/idrid-disease-grading" (optional)
 MAKE_CACHE = False        # also build the uint8 .npy caches (~800 MB) for the Kaggle classifier fallback'''),
     ("code", SETUP.replace('"ninja",\n                "imageio-ffmpeg", "psutil", "scipy", "pyspng"', '"imagehash", "opencv-python-headless", "scikit-learn", "pandas", "scipy", "pillow"')),
@@ -219,6 +219,13 @@ MAKE_CACHE = False        # also build the uint8 .npy caches (~800 MB) for the K
 os.environ["GENAI_DATA"] = DATA
 os.environ["GENAI_SPLITS"] = f"{OUT}/splits"
 os.makedirs(f"{DATA}/raw/aptos", exist_ok=True); os.makedirs(f"{OUT}/splits", exist_ok=True)
+if APTOS_INPUT == "auto":
+    found = [os.path.dirname(p) for p in glob.glob("/kaggle/input/**/train.csv", recursive=True)
+             if os.path.isdir(os.path.join(os.path.dirname(p), "train_images"))]
+    print("APTOS candidates:", found)
+    assert found, "add the APTOS 2019 competition as input"
+    APTOS_INPUT = found[0]
+print("APTOS_INPUT =", APTOS_INPUT)
 assert os.path.exists(f"{APTOS_INPUT}/train.csv"), "add the APTOS 2019 competition as input"
 if not os.path.exists(f"{DATA}/raw/aptos/train_images"):
     os.symlink(f"{APTOS_INPUT}/train_images", f"{DATA}/raw/aptos/train_images")
