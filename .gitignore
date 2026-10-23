@@ -1,7 +1,7 @@
-# data, weights, caches (never commit)
-data/
-outputs/
-checkpoints/
+# data, weights, caches (never commit); root-anchored so src/data/ stays tracked
+/data/
+/outputs/
+/checkpoints/
 *.pkl
 *.pt
 *.pth
@@ -10,6 +10,7 @@ checkpoints/
 kaggle.json
 .env
 .env.*
+!.env.example
 
 # python
 __pycache__/
