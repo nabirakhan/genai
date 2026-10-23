@@ -6,12 +6,12 @@ import * as THREE from "three";
 /* Shatter-Me style eye. An almond aperture cut into a painted face plane, a large iridescent
    eyeball (with branching blood vessels) behind it that follows the cursor. The camera looks
    straight at the eye and the frame is lens-shifted to place it on the right, so the sclera
-   fills both corners. The inner (right) corner is a small rounded notch where the tears drain.
+   fills both corners. Eyeshadow sweeps from the lash line into a wing over a black winged liner.
    Every lash on both lids IS a branch: a gnarled axis with side branches, forks and twiggy
    clumps, radiating outward from the lid line. Five big limbs rise from the upper lid. Leaves
-   grow along the twigs, with sparse crystals and a few flowers at the ends. A handful of
-   crystallised tears, each a smooth water body with its own neck/bulb profile, hang from the
-   lower lid. Blink = the aperture closes and the lashes bend. */
+   grow along the twigs, with sparse crystals and a few flowers at the ends. Thin wavy tear
+   strands stream down from the lower lid near the inner corner, with droplets along them.
+   Blink = the aperture closes and the lashes bend. */
 
 const W = 1.25; // half width of the eye aperture (world units)
 const Z_EYE_R = 1.55; // eyeball radius: big enough that the aperture corners never look past it
@@ -192,11 +192,54 @@ void main() {
   float near = 1.0 - smoothstep(0.0, 0.9, -edge);
   skin += sp * vec3(1.0, 0.78, 0.86) * (0.25 + 0.6 * near);
 
+  // eyeshadow: one continuous band above the lash line whose baseline continues past the outer
+  // (-x) corner as a rising wing; colour runs plum -> rose -> pink -> peach-gold going up,
+  // violet toward the outer corner, gold toward the inner one; a smudge under the lower lid
+  float nx = p.x / W;
+  float lowerD = lo - p.y;
+  float wingT = clamp((-W - p.x) / 0.6, 0.0, 1.0);
+  float baseY = p.x >= -W ? up : -0.62 * (p.x + W);
+  float d = p.y - baseY;
+  float H = mix(0.72, 0.92, smoothstep(-0.1, -0.9, nx)) * (1.0 - 0.95 * smoothstep(0.0, 1.0, wingT));
+  float upperA = (1.0 - smoothstep(H * 0.35, H, d)) * smoothstep(-0.08, 0.02, d);
+  upperA *= (1.0 - smoothstep(1.02, 1.32, nx)) * (1.0 - smoothstep(0.8, 1.0, wingT));
+  float along = 1.0 - smoothstep(1.02, 1.32, abs(nx));
+  float lowerA = (1.0 - smoothstep(0.02, 0.24, lowerD)) * step(0.0, lowerD) * along * 0.7;
+  float shadowA = max(upperA, lowerA);
+  float tint = 0.85 + 0.15 * fbm(p * 4.0 + 11.0);
+  float hgt = max(d, lowerD);
+  vec3 shade = vec3(0.24, 0.04, 0.18);
+  shade = mix(shade, vec3(0.74, 0.2, 0.38), smoothstep(0.02, 0.16, hgt));
+  shade = mix(shade, vec3(0.98, 0.45, 0.62), smoothstep(0.14, 0.3, hgt));
+  shade = mix(shade, vec3(0.97, 0.72, 0.5), smoothstep(0.3, 0.55, hgt));
+  shade = mix(shade, vec3(0.45, 0.26, 0.72), smoothstep(-0.3, -1.1, nx) * 0.55);
+  shade = mix(shade, vec3(0.98, 0.78, 0.55), smoothstep(0.5, 1.0, nx) * 0.35);
+  shade *= tint;
+  vec2 sg = floor(p * 260.0 + 3.0);
+  float shimmer = step(0.972, hash(sg)) * (0.5 + 0.5 * sin(uTime * 4.0 + hash(sg + 1.0) * 50.0));
+  shade += shimmer * vec3(1.0, 0.85, 0.7) * 0.9 * shadowA;
+  skin = mix(skin, shade, clamp(shadowA, 0.0, 1.0) * 0.92);
+
   // liner along the lid line: black, turning fleshy pink into the inner corner
   float liner = 1.0 - smoothstep(0.0, 0.1, -edge);
   float innerX = smoothstep(0.55, 0.98, p.x / W);
   vec3 linerCol = mix(vec3(0.02, 0.0, 0.015), vec3(0.6, 0.2, 0.28), innerX);
   skin = mix(skin, linerCol, liner * 0.92);
+
+  // winged black liner: crisp stroke above the upper lash line, thickening outward and flicking
+  // into a sharp wing along the shadow's baseline, with a drop shadow beneath and a gloss on top
+  float flickT = clamp((-W - p.x) / 0.4, 0.0, 1.0);
+  float lthick = p.x >= -W ? mix(0.018, 0.075, smoothstep(0.3, -1.0, nx)) : 0.075 * (1.0 - flickT);
+  float ld = p.y - baseY;
+  float wingLiner = smoothstep(-0.006, 0.006, ld) * (1.0 - smoothstep(lthick - 0.006, lthick + 0.006, ld));
+  wingLiner *= 1.0 - smoothstep(1.02, 1.1, nx);
+  wingLiner *= p.x >= -W ? 1.0 : 1.0 - smoothstep(0.92, 1.0, flickT);
+  float under = exp(-pow((baseY - p.y) / 0.045, 2.0)) * step(p.y, baseY) * smoothstep(-W * 0.5, -W * 0.9, p.x) * (1.0 - inside) * (1.0 - smoothstep(0.85, 1.0, flickT));
+  skin = mix(skin, vec3(0.03, 0.0, 0.02), under * 0.55);
+  vec3 linerBody = mix(vec3(0.015, 0.0, 0.01), vec3(0.1, 0.02, 0.07), clamp(ld / max(lthick, 0.001), 0.0, 1.0));
+  skin = mix(skin, linerBody, wingLiner);
+  float gloss = smoothstep(lthick - 0.022, lthick - 0.009, ld) * (1.0 - smoothstep(lthick - 0.009, lthick, ld)) * wingLiner;
+  skin = mix(skin, vec3(0.32, 0.14, 0.24), gloss * 0.45);
   float crease = exp(-pow((p.y - (up + 0.24)) / 0.05, 2.0)) * step(abs(p.x), W * 1.05) * uOpen;
   skin = mix(skin, vec3(0.04, 0.0, 0.03), crease * 0.5);
 
@@ -250,9 +293,8 @@ type Seg = { root: number; ox: number; oy: number; oz: number; a: number; len: n
 type Crystal = { root: number; ox: number; oy: number; oz: number; sx: number; sy: number; rot: number; tilt: number; color: THREE.Color; spin: number };
 type Leaf = { root: number; ox: number; oy: number; oz: number; dir: number; len: number; width: number; curl: number; turn: number; phase: number; color: THREE.Color };
 type Flower = { root: number; ox: number; oy: number; oz: number; size: number; rot: number; n: number; layers: number; cup: number; tiltX: number; tiltY: number; color: THREE.Color; center: THREE.Color; spin: number };
-type Tear = { root: number; ox: number; oy: number; variant: number; R: number; L: number; phase: number; sway: number };
 type Root = { x: number; aOpen: number; aClosed: number; upper: boolean; follow: number; sway: number };
-type Forest = { roots: Root[]; segs: Seg[]; tears: Tear[]; crystals: Crystal[]; leaves: Leaf[]; flowers: Flower[] };
+type Forest = { roots: Root[]; segs: Seg[]; crystals: Crystal[]; leaves: Leaf[]; flowers: Flower[] };
 type Rng = () => number;
 type Style = {
   curl: number;        // how gnarled each piece is
@@ -272,9 +314,6 @@ const CRYSTAL_COLORS = ["#fff4f8", "#ffd1e0", "#f3b6ff", "#ffe9a8", "#ff9fc0"].m
 const FLOWER_COLORS = ["#ffb0c8", "#fff0f5", "#ff6fa0", "#d9a7ff", "#ffd9b0", "#ff8fb3"].map((c) => new THREE.Color(c));
 const CENTER_COLORS = ["#ffd36b", "#ffb347", "#fff1a8", "#ff7aa2"].map((c) => new THREE.Color(c));
 const LEAF_COLORS = ["#2e6b3b", "#5d7a2c", "#1f5c4c", "#3b7d5a", "#6a1f3a", "#8a2a3d", "#4a6b2a"].map((c) => new THREE.Color(c));
-
-// water-drip profiles (variant 0 is the bead at the lid line): bulb centre position along the drop
-const TEAR_BULB_POS = [0.5, 0.78, 0.84, 0.72, 0.88, 0.8];
 
 function pick<T>(arr: T[], rand: Rng): T {
   return arr[Math.floor(rand() * arr.length) % arr.length];
@@ -370,31 +409,6 @@ function growBranch(root: number, x: number, y: number, a: number, len: number, 
   }
 }
 
-// a crystallised tear: one smooth water body hanging from the lid line, thin neck swelling into a
-// bulb (profile variant 1-5), plus a small meniscus bead (variant 0) and sometimes a detached
-// falling drop below. Kinds: 0 bead only, 1 short run, 2 medium, 3 long ooze.
-function growTear(f: Forest, root: number, kind: 0 | 1 | 2 | 3, rand: Rng) {
-  const bead = 0.016 + rand() * 0.012;
-  f.tears.push({ root, ox: 0, oy: 0.012, variant: 0, R: bead, L: bead * (1.1 + rand() * 0.5), phase: rand() * 6.28, sway: 0 });
-  if (kind === 0) return;
-  const L = kind === 1 ? 0.07 + rand() * 0.09 : kind === 2 ? 0.18 + rand() * 0.16 : 0.4 + rand() * 0.35;
-  const R = kind === 1 ? 0.016 + rand() * 0.008 : kind === 2 ? 0.02 + rand() * 0.012 : 0.026 + rand() * 0.016;
-  const variant = 1 + Math.floor(rand() * 5);
-  f.tears.push({ root, ox: 0, oy: 0.004, variant, R, L, phase: rand() * 6.28, sway: 0.02 + rand() * 0.03 });
-  const bulbPos = TEAR_BULB_POS[variant];
-  const facets = kind === 1 ? 1 : 1 + Math.floor(rand() * 3);
-  for (let i = 0; i < facets; i++) {
-    f.crystals.push({ root, ox: (rand() - 0.5) * R * 1.3, oy: -L * bulbPos - R * (0.5 + rand() * 1.2), oz: 0.05 + rand() * 0.02,
-                      sx: 0.005 + rand() * 0.006, sy: 0.014 + rand() * 0.02, rot: rand() * Math.PI * 2, tilt: (rand() - 0.5) * 1.2,
-                      color: pick(CRYSTAL_COLORS, rand), spin: (rand() - 0.5) * 0.5 });
-  }
-  if (kind === 3 && rand() < 0.6) {
-    const d = 0.009 + rand() * 0.007;
-    f.tears.push({ root, ox: (rand() - 0.5) * 0.02, oy: -L - 0.06 - rand() * 0.1, variant: 1 + Math.floor(rand() * 5), R: d, L: d * (1.8 + rand() * 0.8),
-                   phase: rand() * 6.28, sway: 0.01 });
-  }
-}
-
 function randomStyle(rand: Rng, lean: number): Style {
   return {
     curl: 0.12 + rand() * 0.3,
@@ -412,7 +426,7 @@ function randomStyle(rand: Rng, lean: number): Style {
 }
 
 function buildForest(detail: number): Forest {
-  const f: Forest = { roots: [], segs: [], tears: [], crystals: [], leaves: [], flowers: [] };
+  const f: Forest = { roots: [], segs: [], crystals: [], leaves: [], flowers: [] };
   const roots = f.roots;
   const rand = makeRng(4242);
   const addRoot = (r: Root) => roots.push(r) - 1;
@@ -461,16 +475,163 @@ function buildForest(detail: number): Forest {
     growBranch(r, 0, 0, aOpen, height * 0.4, (big ? 0.02 : 0.011) * (0.8 + 0.4 * rand()), big ? 4 : 2, st, f, rand);
   }
 
-  // crystallised tears: beads, short runs, medium runs and long oozes, draining from the inner corner
-  const tearPlan: [number, 0 | 1 | 2 | 3][] = [[0.4, 1], [0.47, 0], [0.53, 3], [0.6, 2], [0.68, 0], [0.74, 3], [0.8, 1], [0.86, 2], [0.91, 3]];
-  for (const [base, kind] of tearPlan) {
-    if (detail < 1 && kind === 0 && rand() < 0.5) continue;
-    const nx = base + (rand() - 0.5) * 0.03;
-    const r = addRoot({ x: nx * W, aOpen: Math.PI, aClosed: Math.PI, upper: false, follow: 0.7, sway: 0 });
-    growTear(f, r, kind, rand);
-  }
-
   return f;
+}
+
+/* ---------- tear streaks ----------------------------------------------------------------- */
+
+// a streak is a baked random-walk path (mostly straight down, small meanders, the odd kink) swept
+// into a thin tube whose radius tapers and swells into little beads where water pools
+type Streak = { rootX: number; x: number; yOff: number; geom: THREE.BufferGeometry; tip: { x: number; y: number; size: number } | null; bead: number };
+
+function tubeFromPath(pts: THREE.Vector3[], radii: number[], radial = 8): THREE.BufferGeometry {
+  const n = pts.length;
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const idx: number[] = [];
+  const tangent = new THREE.Vector3();
+  const n1 = new THREE.Vector3();
+  const n2 = new THREE.Vector3();
+  const nv = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    if (i < n - 1) tangent.subVectors(pts[i + 1], pts[i]).normalize();
+    else tangent.subVectors(pts[i], pts[i - 1]).normalize();
+    n1.crossVectors(tangent, Z_AXIS).normalize();
+    n2.crossVectors(tangent, n1).normalize();
+    for (let j = 0; j < radial; j++) {
+      const a = (j / radial) * Math.PI * 2;
+      nv.copy(n1).multiplyScalar(Math.cos(a)).addScaledVector(n2, Math.sin(a));
+      pos.push(pts[i].x + nv.x * radii[i], pts[i].y + nv.y * radii[i], pts[i].z + nv.z * radii[i]);
+      nor.push(nv.x, nv.y, nv.z);
+    }
+  }
+  for (let i = 0; i < n - 1; i++) {
+    for (let j = 0; j < radial; j++) {
+      const a = i * radial + j, b = i * radial + ((j + 1) % radial), c = (i + 1) * radial + j, d = (i + 1) * radial + ((j + 1) % radial);
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+function buildStreaks(detail: number): Streak[] {
+  const rand = makeRng(777);
+  const out: Streak[] = [];
+  const make = (rootX: number, x: number, yOff: number, len: number, r0: number, drift0: number, endSize: number, bead: number, allowFork: boolean) => {
+    const step = 0.018;
+    const n = Math.max(4, Math.round(len / step));
+    const pts: THREE.Vector3[] = [];
+    const radii: number[] = [];
+    const beads = Array.from({ length: Math.floor(rand() * 3) }, () => ({ t: 0.2 + rand() * 0.6, s: 0.006 + rand() * 0.01 }));
+    let px = 0, py = 0, drift = drift0;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push(new THREE.Vector3(px, py, 0));
+      let r = r0 * (1 - 0.45 * t);
+      for (const b of beads) r += b.s * Math.exp(-Math.pow((t - b.t) / 0.035, 2));
+      radii.push(r);
+      drift = THREE.MathUtils.clamp(drift + (rand() - 0.5) * 0.18 - drift * 0.08, -0.55, 0.55);
+      if (rand() < 0.06) drift += (rand() - 0.5) * 0.6;
+      px += drift * step + (rand() - 0.5) * 0.004;
+      py -= step * (0.9 + 0.2 * rand());
+    }
+    out.push({ rootX, x, yOff, geom: tubeFromPath(pts, radii), tip: endSize > 0 ? { x: px, y: py, size: endSize } : null, bead });
+    if (allowFork && len > 0.28 && beads.length && rand() < 0.4) {
+      const q = pts[Math.min(n, Math.round(beads[0].t * n))];
+      make(rootX, x + q.x, yOff + q.y, 0.08 + rand() * 0.16, r0 * 0.6, (rand() < 0.5 ? -1 : 1) * (0.25 + rand() * 0.3), 0.008 + rand() * 0.006, 0, false);
+    }
+  };
+  const plan = [0.36, 0.43, 0.5, 0.56, 0.62, 0.68, 0.74, 0.8, 0.86, 0.92];
+  plan
+    .filter((_, i) => detail >= 1 || i % 2 === 0)
+    .forEach((nx0) => {
+      const nx = nx0 + (rand() - 0.5) * 0.03;
+      const near = Math.exp(-Math.pow((nx - 0.66) / 0.25, 2));
+      const len = (0.1 + 0.65 * near) * (0.5 + 1.0 * rand());
+      make(nx * W, nx * W, 0, len, 0.006 + rand() * 0.004, (rand() - 0.5) * 0.3, rand() < 0.85 ? 0.01 + rand() * 0.011 : 0, 0.009 + rand() * 0.008, true);
+    });
+  return out;
+}
+
+// droplet hanging from its origin down to y = -1, unit radius at its fullest point (p pushes the
+// bulge down, q rounds the body); index 0 is the flatter bead used at the lid line
+const DROP_GEOMS = [
+  { p: 1.0, q: 0.5 },
+  { p: 1.6, q: 0.75 },
+].map(({ p, q }) => {
+  const pts: THREE.Vector2[] = [];
+  const N = 28;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    pts.push(new THREE.Vector2(Math.max(0.003, Math.pow(Math.sin(Math.PI * Math.pow(t, p)), q)), -t));
+  }
+  return new THREE.LatheGeometry(pts, 16);
+});
+
+function Tears({ openRef, detail }: { openRef: React.MutableRefObject<number>; detail: number }) {
+  const streaks = useMemo(() => buildStreaks(detail), [detail]);
+  const tips = useMemo(() => streaks.filter((s) => s.tip), [streaks]);
+  const beads = useMemo(() => streaks.filter((s) => s.bead > 0), [streaks]);
+  const meshes = useRef<(THREE.Mesh | null)[]>([]);
+  const tipRef = useRef<THREE.InstancedMesh>(null!);
+  const beadRef = useRef<THREE.InstancedMesh>(null!);
+  const tmp = useMemo(() => ({ m: new THREE.Matrix4(), q: new THREE.Quaternion(), p: new THREE.Vector3(), s: new THREE.Vector3() }), []);
+
+  useFrame((state) => {
+    const now = state.clock.elapsedTime;
+    const open = openRef.current;
+    const { m, q, p, s } = tmp;
+    q.identity();
+    streaks.forEach((st, i) => {
+      const mesh = meshes.current[i];
+      if (mesh) mesh.position.set(st.x, lowerLid(st.rootX) * open - 0.004 + st.yOff, Z_LASH + 0.03);
+    });
+    beads.forEach((st, i) => {
+      const b = st.bead;
+      p.set(st.x, lowerLid(st.rootX) * open + 0.012, Z_LASH + 0.03);
+      s.set(b, b * 1.3, b);
+      m.compose(p, q, s);
+      beadRef.current.setMatrixAt(i, m);
+    });
+    beadRef.current.instanceMatrix.needsUpdate = true;
+    tips.forEach((st, i) => {
+      const tp = st.tip!;
+      const wob = 1 + 0.04 * Math.sin(now * 1.7 + i);
+      p.set(st.x + tp.x, lowerLid(st.rootX) * open - 0.004 + st.yOff + tp.y + tp.size * 0.35, Z_LASH + 0.032);
+      s.set(tp.size * wob, tp.size * 1.6 / wob, tp.size * wob);
+      m.compose(p, q, s);
+      tipRef.current.setMatrixAt(i, m);
+    });
+    tipRef.current.instanceMatrix.needsUpdate = true;
+  });
+
+  return (
+    <>
+      {streaks.map((st, i) => (
+        <mesh
+          key={i}
+          ref={(el) => {
+            meshes.current[i] = el;
+          }}
+          geometry={st.geom}
+          frustumCulled={false}
+          renderOrder={2}
+        >
+          <meshPhysicalMaterial color="#fff0f6" transparent opacity={0.88} roughness={0.03} clearcoat={1} clearcoatRoughness={0.02} emissive="#ff9fc0" emissiveIntensity={0.22} depthWrite={false} />
+        </mesh>
+      ))}
+      <instancedMesh ref={tipRef} args={[DROP_GEOMS[1], undefined, Math.max(1, tips.length)]} count={tips.length} frustumCulled={false} renderOrder={2}>
+        <meshPhysicalMaterial color="#fff0f6" transparent opacity={0.9} roughness={0.03} clearcoat={1} clearcoatRoughness={0.02} emissive="#ff9fc0" emissiveIntensity={0.25} />
+      </instancedMesh>
+      <instancedMesh ref={beadRef} args={[DROP_GEOMS[0], undefined, Math.max(1, beads.length)]} count={beads.length} frustumCulled={false} renderOrder={2}>
+        <meshPhysicalMaterial color="#fff0f6" transparent opacity={0.85} roughness={0.03} clearcoat={1} clearcoatRoughness={0.02} emissive="#ff9fc0" emissiveIntensity={0.2} />
+      </instancedMesh>
+    </>
+  );
 }
 
 /* ---------- geometries ------------------------------------------------------------------- */
@@ -478,33 +639,6 @@ function buildForest(detail: number): Forest {
 const SEG_GEOM = new THREE.CylinderGeometry(0.42, 1, 1, 5, 1).translate(0, 0.5, 0);
 const CRYSTAL_GEOM = new THREE.OctahedronGeometry(1, 0).scale(1, 1, 0.45);
 const CENTER_GEOM = new THREE.SphereGeometry(1, 10, 10).scale(1, 1, 0.6);
-
-// water drip hanging from the origin down to y = -1: neck radius `neck` (relative to the bulb),
-// swelling smoothly into a bulb centred at `bulbPos`, rounded bottom. Variant 0 is a bead.
-const TEAR_VARIANTS = [
-  { neck: 0.9, bulbPos: 0.5, w: 0.6 },
-  { neck: 0.12, bulbPos: 0.78, w: 0.3 },
-  { neck: 0.2, bulbPos: 0.84, w: 0.42 },
-  { neck: 0.09, bulbPos: 0.72, w: 0.22 },
-  { neck: 0.16, bulbPos: 0.88, w: 0.5 },
-  { neck: 0.25, bulbPos: 0.8, w: 0.36 },
-].map(({ neck, bulbPos, w }) => {
-  const pts: THREE.Vector2[] = [];
-  const N = 32;
-  for (let i = 0; i <= N; i++) {
-    const t = i / N;
-    let r: number;
-    if (t <= bulbPos) {
-      r = neck + (1 - neck) * Math.exp(-Math.pow((t - bulbPos) / w, 2));
-      if (t < 0.06) r *= 0.6 + 0.4 * (t / 0.06); // slight pinch right under the lid
-    } else {
-      const u = (t - bulbPos) / (1 - bulbPos);
-      r = Math.sqrt(Math.max(0, 1 - u * u));
-    }
-    pts.push(new THREE.Vector2(Math.max(0.002, r), -t));
-  }
-  return new THREE.LatheGeometry(pts, 18);
-});
 
 const LEAF_GEOM = (() => {
   const s = new THREE.Shape();
@@ -528,7 +662,6 @@ const PETAL_GEOM = (() => {
 
 function Forest({ openRef, detail }: { openRef: React.MutableRefObject<number>; detail: number }) {
   const segRef = useRef<THREE.InstancedMesh>(null!);
-  const tearRefs = useRef<(THREE.InstancedMesh | null)[]>([]);
   const crystalRef = useRef<THREE.InstancedMesh>(null!);
   const leafRef = useRef<THREE.InstancedMesh>(null!);
   const petalRef = useRef<THREE.InstancedMesh>(null!);
@@ -539,7 +672,6 @@ function Forest({ openRef, detail }: { openRef: React.MutableRefObject<number>; 
       Array.from({ length: fl.n * fl.layers }, (_, j) => ({ fi, k: j % fl.n, layer: Math.floor(j / fl.n) }))),
     [forest]
   );
-  const tearGroups = useMemo(() => TEAR_VARIANTS.map((_, vi) => forest.tears.filter((t) => t.variant === vi)), [forest]);
   const n = forest.roots.length;
   const tmp = useMemo(
     () => ({ m: new THREE.Matrix4(), q: new THREE.Quaternion(), q2: new THREE.Quaternion(), q3: new THREE.Quaternion(),
@@ -588,23 +720,6 @@ function Forest({ openRef, detail }: { openRef: React.MutableRefObject<number>; 
       segMesh.setMatrixAt(i, m);
     }
     segMesh.instanceMatrix.needsUpdate = true;
-
-    for (let vi = 0; vi < tearGroups.length; vi++) {
-      const mesh = tearRefs.current[vi];
-      const list = tearGroups[vi];
-      if (!mesh) continue;
-      for (let i = 0; i < list.length; i++) {
-        const t = list[i];
-        p.set(px(t.root, t.ox, t.oy), py(t.root, t.ox, t.oy), Z_LASH + 0.03);
-        e.set(0, 0, -delta[t.root] * 0.3 + t.sway * Math.sin(now * 1.3 + t.phase));
-        q.setFromEuler(e);
-        const wob = 1 + 0.03 * Math.sin(now * 1.9 + t.phase);
-        s.set(t.R * wob, t.L, t.R * wob);
-        m.compose(p, q, s);
-        mesh.setMatrixAt(i, m);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
-    }
 
     for (let i = 0; i < crystals.length; i++) {
       const c = crystals[i];
@@ -662,20 +777,6 @@ function Forest({ openRef, detail }: { openRef: React.MutableRefObject<number>; 
       <instancedMesh ref={segRef} args={[SEG_GEOM, undefined, forest.segs.length]} frustumCulled={false}>
         <meshStandardMaterial color="#0a0206" roughness={0.65} metalness={0.08} />
       </instancedMesh>
-      {TEAR_VARIANTS.map((geom, vi) => (
-        <instancedMesh
-          key={vi}
-          ref={(el) => {
-            tearRefs.current[vi] = el;
-          }}
-          args={[geom, undefined, Math.max(1, tearGroups[vi].length)]}
-          count={tearGroups[vi].length}
-          frustumCulled={false}
-          renderOrder={2}
-        >
-          <meshPhysicalMaterial color="#fff0f6" transparent opacity={0.86} roughness={0.03} metalness={0.05} clearcoat={1} clearcoatRoughness={0.02} emissive="#ff9fc0" emissiveIntensity={0.22} />
-        </instancedMesh>
-      ))}
       <instancedMesh ref={crystalRef} args={[CRYSTAL_GEOM, undefined, forest.crystals.length]} frustumCulled={false}>
         <meshPhysicalMaterial color="#ffffff" emissive="#ff7fae" emissiveIntensity={0.25} roughness={0.12} clearcoat={1} transparent opacity={0.9} />
       </instancedMesh>
@@ -797,6 +898,7 @@ function EyeRig({ scale, reduced, detail }: { scale: number; reduced: boolean; d
       </mesh>
 
       <Forest openRef={openRef} detail={detail} />
+      <Tears openRef={openRef} detail={detail} />
 
       <Sparkles count={30} scale={[1.1, 0.8, 0.3]} position={[W * 0.65, -0.7, Z_LASH + 0.12]} size={1.6} speed={0.4} opacity={0.8} color="#ffffff" />
       <Sparkles count={70} scale={[3.0, 1.8, 0.5]} position={[0.2, 1.1, Z_LASH + 0.12]} size={1.6} speed={0.3} opacity={0.6} color="#ffd6e6" />
