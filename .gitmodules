@@ -1,3 +1,4 @@
 [submodule "third_party/stylegan3"]
 	path = third_party/stylegan3
 	url = https://github.com/NVlabs/stylegan3
+	ignore = dirty
