@@ -27,6 +27,18 @@ resumes (our own snapshots) is identical to upstream.
 pickle's `init_kwargs`, runs the tolerant copy and one forward pass, and prints the matching
 `train.py` flags (`--cbase=16384 --cmax=512 --map-depth=8`).
 
+## 0002-modern-python-imports.patch
+
+**Problem.** Kaggle's image runs Python 3.13. `dnnlib/util.py` imports `strtobool` from `distutils`
+(removed from the standard library in 3.12; it only works while setuptools injects a shim), and
+`torch_utils/ops/conv2d_gradfix.py` / `grid_sample_gradfix.py` import `parse_version` from
+`pkg_resources` (deprecated, removed from setuptools 81+). Either missing module would stop every
+training or metrics run at import time.
+
+**Change.** `strtobool` falls back to a local implementation; `parse_version` comes from
+`packaging.version` with `pkg_resources` only as a fallback. Verified: all training, network and
+metrics modules import under Python 3.13 with warnings promoted to errors.
+
 ## Not patched (checked)
 
 - `torch_utils/ops/grid_sample_gradfix.py` already handles PyTorch >= 1.12 (`op[0]`), so ADA runs

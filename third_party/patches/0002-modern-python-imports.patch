@@ -1,0 +1,54 @@
+diff --git a/dnnlib/util.py b/dnnlib/util.py
+index 6bbdf3b..0e4f7bb 100644
+--- a/dnnlib/util.py
++++ b/dnnlib/util.py
+@@ -29,7 +29,16 @@ import urllib
+ import urllib.request
+ import uuid
+ 
+-from distutils.util import strtobool
++try:
++    from distutils.util import strtobool
++except ImportError:  # Python >= 3.12 ships no distutils
++    def strtobool(val):
++        val = val.lower()
++        if val in ("y", "yes", "t", "true", "on", "1"):
++            return 1
++        if val in ("n", "no", "f", "false", "off", "0"):
++            return 0
++        raise ValueError(f"invalid truth value {val!r}")
+ from typing import Any, List, Tuple, Union
+ 
+ 
+diff --git a/torch_utils/ops/conv2d_gradfix.py b/torch_utils/ops/conv2d_gradfix.py
+index 156b6b2..5238eef 100644
+--- a/torch_utils/ops/conv2d_gradfix.py
++++ b/torch_utils/ops/conv2d_gradfix.py
+@@ -11,7 +11,10 @@ arbitrarily high order gradients with zero performance penalty."""
+ 
+ import contextlib
+ import torch
+-from pkg_resources import parse_version
++try:
++    from packaging.version import parse as parse_version
++except ImportError:  # very old environments
++    from pkg_resources import parse_version
+ 
+ # pylint: disable=redefined-builtin
+ # pylint: disable=arguments-differ
+diff --git a/torch_utils/ops/grid_sample_gradfix.py b/torch_utils/ops/grid_sample_gradfix.py
+index 017f03a..3a6e695 100644
+--- a/torch_utils/ops/grid_sample_gradfix.py
++++ b/torch_utils/ops/grid_sample_gradfix.py
+@@ -12,7 +12,10 @@ Only works on 2D images and assumes
+ `mode='bilinear'`, `padding_mode='zeros'`, `align_corners=False`."""
+ 
+ import torch
+-from pkg_resources import parse_version
++try:
++    from packaging.version import parse as parse_version
++except ImportError:  # very old environments
++    from pkg_resources import parse_version
+ 
+ # pylint: disable=redefined-builtin
+ # pylint: disable=arguments-differ
