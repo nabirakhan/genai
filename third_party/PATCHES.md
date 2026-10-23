@@ -39,6 +39,20 @@ training or metrics run at import time.
 `packaging.version` with `pkg_resources` only as a fallback. Verified: all training, network and
 metrics modules import under Python 3.13 with warnings promoted to errors.
 
+## 0003-custom-ops-returned-module.patch
+
+**Problem.** `torch_utils/custom_ops.py` compiles a plugin with `torch.utils.cpp_extension.load()`,
+ignores the returned module and then calls `importlib.import_module(module_name)`. That only worked
+while loading an extension registered it in `sys.modules`; with Kaggle's Python 3.13 + PyTorch 2.11
+the build succeeds and the import fails with `ModuleNotFoundError: No module named 'bias_act_plugin'`
+(first Kaggle run, `check_resume_compat.py`).
+
+**Change.** Use the module returned by `load()`; fall back to the import only if it returned None.
+Covers `bias_act`, `upfirdn2d` and `filtered_lrelu`, which all go through `get_plugin`.
+
+**Verification.** ADA's augment pipe with `grid_sample_gradfix` and `conv2d_gradfix` enabled runs
+forward plus the double backward that R1 needs on PyTorch 2.14 (CPU).
+
 ## Not patched (checked)
 
 - `torch_utils/ops/grid_sample_gradfix.py` already handles PyTorch >= 1.12 (`op[0]`), so ADA runs
