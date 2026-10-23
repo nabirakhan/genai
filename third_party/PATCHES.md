@@ -82,3 +82,19 @@ returns the same FID as the original on SciPy 1.16.3 and 1.17.1.
   on PyTorch 2.x without changes.
 - Custom CUDA ops (`bias_act`, `upfirdn2d`) compile on Kaggle (nvcc present). On machines without
   a compiler they fall back to the slow reference implementation with a warning; inference only.
+
+## Known upstream behaviour (kept; mention in the report's method section)
+
+Found by a CPU run of the full training loop (both Python 3.11/torch 2.14 and 3.13/torch 2.10,
+including 2-rank DDP, same-shape resume and the conditional-from-unconditional resume):
+
+- **fc0 transfer is not function-preserving.** `FullyConnectedLayer` scales by
+  `lr_multiplier / sqrt(in_features)`, so widening `mapping.fc0` from 512 to 1024 inputs shrinks the
+  copied z-columns' gain by 1/sqrt(2), and the fresh label columns add an equal-variance term. At
+  init the transferred mapping's W has a centred cosine of about 0.5 to FFHQ's. Fine-tuning absorbs
+  this; every fraction's GAN uses the same procedure, so the comparison stays fair.
+- **Adam state and the path-length mean `pl_mean` are not stored in snapshots**, so each Kaggle
+  session restarts them (a short transient after each resume).
+- **`--seed=0` every session** replays the same sampler and z stream after a resume.
+- `augment_pipe.p` is a registered buffer and is broadcast from rank 0 at "Distributing across
+  GPUs", so 0001's restore on every rank is redundant but harmless.
