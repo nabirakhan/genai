@@ -51,16 +51,19 @@ DATASET_DIR = "/kaggle/input/aptos-dr-256-genai"
 GPUS, BATCH, BATCH_GPU, GAMMA, SNAP = 2, 32, 16, 1.0, 10
 FFHQ = "{FFHQ}"'''),
     ("code", SETUP),
-    ("code", '''src = f"{DATASET_DIR}/aptos256_{FRACTION}"
+    ("code", '''# the zips come either from the data-prep notebook's output or from the aptos-dr-256-genai dataset
+cands = sorted(glob.glob(f"/kaggle/input/**/aptos256_{FRACTION}.zip", recursive=True)) + \\
+        sorted(glob.glob(f"/kaggle/input/**/aptos256_{FRACTION}", recursive=True))
+if not cands:
+    raise SystemExit(f"aptos256_{FRACTION} not found under /kaggle/input: add the data-prep notebook output or the dataset as input")
+src = cands[0]
 if os.path.isdir(src):                      # Kaggle extracted the zip -> re-zip locally (faster reads)
     DATA = f"{WORK}/data/aptos256_{FRACTION}.zip"
     if not os.path.exists(DATA):
         os.makedirs(f"{WORK}/data", exist_ok=True)
         shutil.make_archive(DATA[:-4], "zip", src)
-elif os.path.exists(src + ".zip"):
-    DATA = src + ".zip"
 else:
-    raise SystemExit(f"dataset not found at {src}; attach aptos-dr-256-genai")
+    DATA = src
 print("DATA =", DATA, json.load(__import__("zipfile").ZipFile(DATA).open("dataset.json"))["labels"][:3])'''),
     ("code", '''def total_kimg(path):
     m = re.search(r"-from(\\d+)[/\\\\].*snapshot-(\\d+)", path)
@@ -158,8 +161,9 @@ for tag, s in sorted(best.items()):
     if not os.path.exists(dst): shutil.copy(s, dst)
     PKLS[tag] = dst; print(f"{tag}: {total_kimg(s)} kimg  <- {s}")
 assert PKLS, "no snapshots found; attach the train notebook outputs"
-val = f"{DATASET_DIR}/aptos256_val"
-REAL_VAL = val if os.path.isdir(val) else val + ".zip"
+vals = sorted(glob.glob("/kaggle/input/**/aptos256_val.zip", recursive=True)) + sorted(glob.glob("/kaggle/input/**/aptos256_val", recursive=True))
+assert vals, "aptos256_val not found under /kaggle/input: add the data-prep notebook output or the dataset as input"
+REAL_VAL = vals[0]
 print("REAL_VAL =", REAL_VAL)'''),
     ("code", '''import pandas as pd
 overall = []
@@ -194,6 +198,55 @@ print(sorted(os.listdir(WORK)))'''),
 ]
 
 
+PREP_CELLS = [
+    ("markdown", """# Data prep on Kaggle (CPU): splits + stylegan3 zips from the APTOS competition data
+
+Use this when the lab PC has not produced the dataset yet. Before running:
+
+1. **Add Input → Competitions → APTOS 2019 Blindness Detection** (accept the rules on the competition page first).
+2. Optional: add an IDRiD dataset (part B, disease grading) and set `IDRID_INPUT` to its folder; otherwise IDRiD is skipped here and done on the lab PC.
+3. Settings: **Internet ON**, CPU is enough. Run with *Save Version → Save & Run All (Commit)*.
+
+Output (`/kaggle/working/out`): `splits/aptos_dedup_dropped.csv`, `splits/aptos_splits.csv`, `sg3/aptos256_f010..f100.zip`, `sg3/aptos256_val.zip`.
+Then in the GAN notebooks use **Add Input → Your Work → this notebook** (its output is searched automatically).
+Download `splits/*.csv` and commit them to the repo so every machine uses the same split."""),
+    ("code", f'''REPO = "{REPO_URL}"
+APTOS_INPUT = "/kaggle/input/aptos2019-blindness-detection"
+IDRID_INPUT = ""          # e.g. "/kaggle/input/idrid-disease-grading" (optional)
+MAKE_CACHE = False        # also build the uint8 .npy caches (~800 MB) for the Kaggle classifier fallback'''),
+    ("code", SETUP.replace('"ninja",\n                "imageio-ffmpeg", "psutil", "scipy", "pyspng"', '"imagehash", "opencv-python-headless", "scikit-learn", "pandas", "scipy", "pillow"')),
+    ("code", '''DATA = f"{WORK}/data"; OUT = f"{WORK}/out"
+os.environ["GENAI_DATA"] = DATA
+os.environ["GENAI_SPLITS"] = f"{OUT}/splits"
+os.makedirs(f"{DATA}/raw/aptos", exist_ok=True); os.makedirs(f"{OUT}/splits", exist_ok=True)
+assert os.path.exists(f"{APTOS_INPUT}/train.csv"), "add the APTOS 2019 competition as input"
+if not os.path.exists(f"{DATA}/raw/aptos/train_images"):
+    os.symlink(f"{APTOS_INPUT}/train_images", f"{DATA}/raw/aptos/train_images")
+shutil.copy(f"{APTOS_INPUT}/train.csv", f"{DATA}/raw/aptos/train.csv")
+sh([sys.executable, "-m", "src.data.download_aptos", "--skip-download"])
+if IDRID_INPUT:
+    os.makedirs(f"{DATA}/raw/idrid", exist_ok=True)
+    for name in os.listdir(IDRID_INPUT):
+        dst = f"{DATA}/raw/idrid/{name}"
+        if not os.path.exists(dst): os.symlink(f"{IDRID_INPUT}/{name}", dst)'''),
+    ("code", '''sh([sys.executable, "-m", "src.data.prepare_images", "--source", "both" if IDRID_INPUT else "aptos"])
+sh([sys.executable, "-m", "src.data.dedup"])
+sh([sys.executable, "-m", "src.data.split"])
+sh([sys.executable, "-m", "src.data.make_sg3_zips"])
+if MAKE_CACHE:
+    sh([sys.executable, "-m", "src.data.cache"])'''),
+    ("code", '''shutil.copytree(f"{DATA}/sg3", f"{OUT}/sg3", dirs_exist_ok=True)
+if MAKE_CACHE:
+    shutil.copytree(f"{DATA}/cache", f"{OUT}/cache", dirs_exist_ok=True)
+for root, _, files in os.walk(OUT):
+    for f in files:
+        p = os.path.join(root, f); print(f"{os.path.getsize(p) / 1e6:8.1f} MB  {p}")
+os.chdir(WORK)
+shutil.rmtree(DATA, ignore_errors=True)      # keep only /kaggle/working/out in the saved output
+shutil.rmtree(CODE, ignore_errors=True)'''),
+]
+
+
 def nb(cells):
     out = {"cells": [], "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
                                      "language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 5}
@@ -206,6 +259,7 @@ def nb(cells):
 
 
 if __name__ == "__main__":
+    (HERE / "kaggle_data_prep.ipynb").write_text(json.dumps(nb(PREP_CELLS), indent=1), encoding="utf-8")
     (HERE / "kaggle_gan_train.ipynb").write_text(json.dumps(nb(TRAIN_CELLS), indent=1), encoding="utf-8")
     (HERE / "kaggle_gan_eval.ipynb").write_text(json.dumps(nb(EVAL_CELLS), indent=1), encoding="utf-8")
-    print("wrote kaggle_gan_train.ipynb, kaggle_gan_eval.ipynb")
+    print("wrote kaggle_data_prep.ipynb, kaggle_gan_train.ipynb, kaggle_gan_eval.ipynb")

@@ -86,7 +86,7 @@ export default function Classify() {
                         <li className={`bar${i === top ? " bar--top" : ""}`} key={i}>
                           <span>{res.grade_names[i]}</span>
                           <span className="bar__track">
-                            <span className="bar__fill" style={{ width: `${Math.round(p * 100)}%`, background: `var(${GRADE_VARS[i]})` }} />
+                            <span className="bar__fill" style={{ transform: `scaleX(${p.toFixed(3)})`, background: `var(${GRADE_VARS[i]})` }} />
                           </span>
                           <span className="bar__val">{(p * 100).toFixed(1)}%</span>
                         </li>

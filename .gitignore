@@ -29,3 +29,6 @@ web/.vercel/
 
 # stylegan3 build artefacts inside the submodule
 third_party/stylegan3/**/__pycache__/
+
+# Playwright MCP scratch
+.playwright-mcp/

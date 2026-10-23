@@ -154,6 +154,31 @@ scripts\end_of_session.ps1      # commits splits/ results/ web/public/results, p
 ```
 Check `git status` is clean and `Test-Path $HOME\.kaggle\kaggle.json` is False before leaving.
 
+## Optional: GAN training on the lab PC
+
+The GPU can train a GAN at roughly 7–9 h per 1,000 kimg (about one run per lab week), so use it to
+take one run off Kaggle (for example the f010 no-ADA ablation) or when the Kaggle quota is spent.
+It needs stylegan3's CUDA kernels compiled once:
+
+- **WSL2 route (reliable):** `wsl --install -d Ubuntu-22.04`, inside WSL install `build-essential` and the
+  `cuda-toolkit-12-x` *wsl-ubuntu* package matching the torch build, create the venv there with the
+  same `requirements-lab.txt`, and keep the repo and `GENAI_DATA` inside the WSL filesystem.
+- **Native Windows route:** install Visual Studio Build Tools (C++ workload) and the CUDA toolkit
+  matching torch; run from the "x64 Native Tools" prompt so `cl.exe` and `nvcc` are on PATH.
+
+Then, with the venv active and the dataset zips from S6 present:
+
+```powershell
+python -m src.gan.train_local --fraction f010 --aug noaug --kimg 1000 --hours 2
+```
+
+It resumes from the latest snapshot of that fraction/aug automatically, stops after `--hours` at the
+next snapshot, keeps the last two snapshots under `C:\genai-data\gan_runs\`, and prints the total
+kimg reached. Run it again next session to continue. The classifier queue can run at the same time
+(both fit in 20 GB; each slows the other down). The first run prints the custom-op build; if it
+reports a fallback to reference ops, the compiler setup above is not working and training will be
+far too slow to be useful.
+
 ## Fallbacks
 
 - Lab time short: the classifier runs unchanged on Kaggle T4 (~8 min/run). Add `cache/*.npy` + `splits/` to the Kaggle dataset and run `python -m src.classify.queue` in a notebook with `GENAI_DATA=/kaggle/input/...` (read-only: set `GENAI_RESULTS`/`GENAI_CHECKPOINTS` to `/kaggle/working/...`).
