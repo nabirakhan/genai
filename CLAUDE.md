@@ -74,7 +74,7 @@ Never commit: datasets, generated images in bulk, `*.pkl` / `*.pt` / `*.npy`, `k
 EfficientNet-B0 (timm, ImageNet weights), 256px, fp16 AMP, batch 64, AdamW 3e-4 + cosine, ≤20 epochs, early stop (patience 6) on val QWK, memmapped uint8 cache, 6 persistent DataLoader workers. ~3–5 min/run on the RTX 4000 Ada.
 
 ## GAN defaults (Kaggle)
-`train.py --cfg=stylegan2 --cond=1 --gpus=2 --batch=32 --batch-gpu=16 --gamma=1 --cbase=16384 --cmax=512 --map-depth=8 --mbstd-group=8 --mirror=1 --aug=ada --target=0.6 --tick=4 --snap=10 --metrics=none`, resume from FFHQ-256; ~25–35 s/kimg on T4 x2; order f100 → f010 → f010-noaug → f025 → f050. Generation: 500 per rare grade, psi 0.8, seeds 0–499.
+`train.py --cfg=stylegan2 --cond=1 --gpus=2 --batch=32 --batch-gpu=16 --gamma=1 --cbase=16384 --cmax=512 --map-depth=8 --mbstd-group=8 --mirror=1 --aug=ada --target=0.6 --tick=4 --snap=10 --metrics=none`, resume from FFHQ-256; measured 40.5 s/kimg on T4 x2 (1,000 kimg ≈ 11.4 h, so about 57 GPU-h for all five GANs); order f100 → f010 → f010-noaug → f025 → f050. `src/gan/kaggle_train.py` runs this queue, one ~10 h session per notebook version (settings in `notebooks/kaggle_session.json`; attach the newest train output + the data-prep output). Generation: 500 per rare grade, psi 0.8, seeds 0–499.
 
 ## Timeline (weeks from 19 Oct 2026)
 1 code + smoke tests, lab session 1 (data) · 2 lab: 60 baseline runs; Kaggle: f100 GAN · 3 Kaggle: f100 done, f010 ×2 · 4 Kaggle: f025, f050, generation; api/web skeleton · 5 lab: condition-6 runs · 6 RPS, memorisation, demo assets · 7 analysis, figures, frontend design · 8 report, README, rehearsal.
@@ -85,7 +85,7 @@ EfficientNet-B0 (timm, ImageNet weights), 256px, fp16 AMP, batch 64, AdamW 3e-4 
 - stylegan3 resume from an unconditional pickle needs the shape-tolerant copy patch (fc0 and D.b4.out mismatch); verified on CPU by `scripts/check_resume_compat.py`.
 - Windows shell commands over ~8k characters fail (cmd.exe limit); write files with the editor tools, not giant heredocs.
 - APTOS may not be redistributed and the repo is public: the demo returns nearest-neighbour thumbnails ≤96 px + image id only; committed CSVs and `results/preds/` carry no APTOS labels (joined at analysis time); figures showing real APTOS images (`gradcam_*`, `memorization_*`), the per-image `memorization_f*.csv` tables (nearest neighbours are same-grade, so ids imply grades) and `rps_scores.csv` are gitignored and used only in the report PDF.
-- Kaggle runs Python 3.13 + PyTorch 2.11: stylegan3 needs patches 0002 (distutils/pkg_resources imports), 0003 (custom-op module loading) and 0004 (InfiniteSampler calls `Sampler.__init__()` without data_source), see `third_party/PATCHES.md`.
+- Kaggle runs Python 3.13 + PyTorch 2.11: stylegan3 needs patches 0002 (distutils/pkg_resources imports), 0003 (custom-op module loading), 0004 (InfiniteSampler calls `Sampler.__init__()` without data_source) and 0005 (SciPy >= 1.18 `sqrtm` without `disp`, FID only), see `third_party/PATCHES.md`.
 
 ## How to help me
 I learn fast — explain once. Give the fix directly, then why. Flag security issues. Optimise for memory and speed. No unnecessary boilerplate or comments.

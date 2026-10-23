@@ -9,6 +9,7 @@ ARG REF=main
 RUN useradd -m -u 1000 user
 WORKDIR /app
 RUN git clone --depth 1 --branch ${REF} --recurse-submodules --shallow-submodules ${REPO} /app \
+ && python scripts/apply_patches.py \
  && chown -R user:user /app
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu \
  && pip install --no-cache-dir -r api/requirements.txt

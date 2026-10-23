@@ -89,6 +89,8 @@ GPUS = 2'''),
     ("code", '''from pathlib import Path
 from src.gan.kaggle_train import scan, find_zip, committed_split
 KIMG = int(json.load(open("notebooks/kaggle_session.json"))["kimg"])     # same budget for every GAN
+val, why = find_zip("val", [Path("/kaggle/input")], committed_split())  # check before copying ~1.5 GB of pickles
+assert val is not None, why
 best, _ = scan([Path("/kaggle/input")])
 os.makedirs(f"{WORK}/pkls", exist_ok=True)
 PKLS = {}
@@ -101,8 +103,6 @@ for tag, (total, src) in sorted(best.items()):
     if not os.path.exists(dst): shutil.copy(src, dst)
     PKLS[tag] = dst; print(f"{tag}: {total} kimg  <- {src}")
 assert PKLS, f"no GAN at {KIMG} kimg found; attach the newest genai-gan-train output"
-val, why = find_zip("val", [Path("/kaggle/input")], committed_split())
-assert val is not None, why
 REAL_VAL = str(val); print("REAL_VAL =", REAL_VAL, f"({why})")'''),
     ("code", '''import pandas as pd
 overall = []
@@ -115,8 +115,8 @@ for tag, pkl in PKLS.items():
     for line in r.stdout.splitlines():                 # calc_metrics prints one JSON line per metric
         if line.startswith("{") and '"results"' in line:
             res.update(json.loads(line)["results"])
-    if r.returncode or not res:
-        print(f"WARNING: calc_metrics failed for {tag} (exit {r.returncode})")
+    if r.returncode or len(res) < 2:
+        print(f"WARNING calc_metrics for {tag}: exit {r.returncode}, got {sorted(res)}")
     overall.append(dict(gan=tag, grade="all", n_real=None, n_gen=50000, fid=res.get("fid50k_full"), kid=res.get("kid50k_full"), kid_std=None))
     sh([sys.executable, "-m", "src.gan.metrics_per_class", "--gan", tag, "--synth-dir", out, "--real", REAL_VAL, "--classes", CLASSES, "--out", f"{WORK}/gan_metrics.csv"])
     shutil.make_archive(out, "zip", out)
