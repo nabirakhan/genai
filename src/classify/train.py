@@ -214,7 +214,7 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
                      "n_train": info["n_train"], "n_synth": info["n_synth"], "best_epoch": best_epoch,
                      "epochs_run": epoch + 1, "best_val_qwk": best_qwk, "train_time_s": round(train_time, 1),
                      "model": model_name, "git_sha": git_sha(), "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")})
-        preds = pd.DataFrame({"image_id": info["ids"][ds_name], "y_true": y_true, "y_pred": y_pred})
+        preds = pd.DataFrame({"image_id": info["ids"][ds_name], "y_pred": y_pred})  # labels joined at analysis time
         for k in range(NUM_CLASSES):
             preds[f"p{k}"] = np.round(probs[:, k], 4)
         (results_csv.parent / "preds").mkdir(parents=True, exist_ok=True)

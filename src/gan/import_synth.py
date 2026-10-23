@@ -1,9 +1,10 @@
-"""S9: import synth_f{ppp}.zip files produced on Kaggle into DATA_ROOT/synth/f{ppp}/g{3,4}/.
+"""S9: import synth_f{ppp}-ada.zip files produced on Kaggle into DATA_ROOT/synth/f{ppp}/g{3,4}/.
 
   kaggle kernels output <user>/<eval-notebook> -p downloads/
-  python -m src.gan.import_synth downloads/synth_f100.zip downloads/synth_f010.zip ...
+  python -m src.gan.import_synth downloads/synth_f*.zip
 
-Verifies: every PNG is 256x256 RGB with Synthetic=true metadata; prints counts per class.
+The no-ADA ablation (synth_f010-noaug.zip) is skipped: it is evaluated with FID/KID only and never
+becomes classifier training data. Verifies: every PNG is 256x256 RGB with Synthetic=true metadata.
 """
 import re
 import zipfile
@@ -16,9 +17,12 @@ from src.genai.paths import IMG_SIZE, SYNTH
 
 
 def import_zip(zpath: Path) -> dict[str, int]:
-    m = re.search(r"(f\d{3})", zpath.stem)
+    if zpath.stem.endswith("-noaug"):
+        click.echo(f"skip {zpath.name}: no-ADA ablation (FID/KID only, never classifier training data)")
+        return {}
+    m = re.fullmatch(r"synth_(f\d{3})(?:-ada)?", zpath.stem)
     if not m:
-        raise SystemExit(f"cannot infer fraction tag (f010/f025/f050/f100) from {zpath.name}")
+        raise SystemExit(f"cannot infer fraction tag from {zpath.name}; expected synth_f010-ada.zip etc.")
     tag = m.group(1)
     dest = SYNTH / tag
     counts: dict[str, int] = {}

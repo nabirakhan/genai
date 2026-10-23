@@ -13,7 +13,8 @@ import numpy as np
 import pandas as pd
 
 from src.classify.data import NUM_CLASSES
-from src.genai.paths import RESULTS
+from src.data.split import load_splits
+from src.genai.paths import RESULTS, SPLITS
 
 K = NUM_CLASSES
 _W = (np.arange(K)[:, None] - np.arange(K)[None, :]) ** 2 / (K - 1) ** 2
@@ -79,6 +80,9 @@ def main(preds_dir, out_dir, n_boot, seed):
     rng = np.random.default_rng(seed)
     out_dir.mkdir(parents=True, exist_ok=True)
     files = sorted(preds_dir.glob("*.csv"))
+    truth = {"aptos_test": load_splits().set_index("image_id").grade}  # preds files carry no APTOS labels
+    if (SPLITS / "idrid_test.csv").exists():
+        truth["idrid"] = pd.read_csv(SPLITS / "idrid_test.csv").set_index("image_id").grade
     ci_rows, delta_rows = [], []
     by_key = {}
     for f in files:
@@ -88,6 +92,10 @@ def main(preds_dir, out_dir, n_boot, seed):
         cond, frac, ratio, s = int(m.group(1)), int(m.group(2)) / 100, float(m.group(3)), int(m.group(4))
         dataset = f.stem[m.end() + 1:]
         df = pd.read_csv(f)
+        if "y_true" not in df.columns:
+            df["y_true"] = df.image_id.map(truth[dataset])
+            assert df.y_true.notna().all(), f"{f.name}: ids without a label"
+            df["y_true"] = df.y_true.astype(int)
         ci = bootstrap_metrics(df.y_true.to_numpy(), df.y_pred.to_numpy(), n_boot, rng)
         ci.insert(0, "dataset", dataset)
         ci.insert(0, "run_id", f.stem[:m.end()])

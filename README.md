@@ -22,7 +22,7 @@ the answer changes with the amount of real rare-grade data (10/25/50/100%) and t
 | `third_party/stylegan3` | NVlabs/stylegan3 submodule (pinned) + `patches/` (shape-tolerant resume, ADA p restore), see `PATCHES.md` |
 | `api/` | FastAPI inference service (HF Space, CPU) for the demo |
 | `web/` | React + TypeScript frontend (Vercel) |
-| `splits/`, `results/` | tracked CSVs: dedup list, splits, metrics per run, predictions, tables, figures |
+| `splits/`, `results/` | tracked CSVs: dedup list and split (image ids only, no APTOS labels), metrics per run, predictions, tables, figures |
 | `LAB_RUNBOOK.md` | step-by-step runbook for the lab PC (data + 84 classifier runs) |
 
 Data is never committed; it lives under `GENAI_DATA` (default `C:\genai-data`).
@@ -43,8 +43,9 @@ On a Windows machine where `python` is the Microsoft Store alias, use `py` or `.
 
 ```
 python -m src.pipeline status                 # S0..S15 with DONE/PARTIAL/TODO
-python -m src.data.download_aptos && python -m src.data.prepare_images && python -m src.data.dedup && python -m src.data.split
-python -m src.data.cache && python -m src.data.make_sg3_zips && python -m src.data.kaggle_dataset
+# Kaggle: notebooks/kaggle_data_prep.ipynb (dedup, split, GAN zips) -> commit its splits/*.csv
+python -m src.data.download_aptos && python -m src.data.prepare_images && python -m src.data.split   # split: verify only
+python -m src.data.cache
 python -m src.classify.queue                  # 84 runs, skips finished ones, resumable
 # Kaggle: notebooks/kaggle_gan_train.ipynb per fraction, then kaggle_gan_eval.ipynb
 python -m src.gan.import_synth downloads/synth_f*.zip

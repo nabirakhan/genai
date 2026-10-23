@@ -18,7 +18,8 @@ pairs score < 0.70 here and are visibly different eyes. The shift-tolerant score
 unrelated pairs' 99.99th percentile 0.78. The default 0.90 sits in that gap: ~141 copies dropped,
 40 of them disagreeing with their twin's grade.
 
-Writes splits/aptos_dedup_dropped.csv: dropped_id, kept_id, score, dropped_grade, kept_grade, reason.
+Writes splits/aptos_dedup_dropped.csv: dropped_id, kept_id, score, reason (no grades: the file is
+committed to a public repo and APTOS labels may not be redistributed).
 """
 import click
 import cv2
@@ -32,6 +33,7 @@ from src.genai.paths import APTOS256, RAW_APTOS, SPLITS
 
 FIELD = 128
 MAX_SHIFT = 3
+PUBLIC_COLS = ["dropped_id", "kept_id", "score", "reason"]
 _POPCOUNT = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint8)
 
 
@@ -191,7 +193,7 @@ def main(method: str, threshold: float, hamming: int, topk: int, conflicts: str)
         fields = np.stack([vessel_field(APTOS256 / f"{i}.png") for i in tqdm(ids, desc="vessel fields")])
         dropped = vessel_duplicates(ids, grades, fields, threshold, topk, conflicts)
     SPLITS.mkdir(exist_ok=True)
-    dropped.sort_values("dropped_id").to_csv(SPLITS / "aptos_dedup_dropped.csv", index=False)
+    dropped.sort_values("dropped_id")[PUBLIC_COLS].to_csv(SPLITS / "aptos_dedup_dropped.csv", index=False)
     dup = dropped[dropped.reason != "grade conflict among copies"]
     n_conf = int((dup.dropped_grade != dup.kept_grade).sum())
     click.echo(f"method={method}: {len(dup)} duplicate copies dropped, {n_conf} of them with a grade conflict; "

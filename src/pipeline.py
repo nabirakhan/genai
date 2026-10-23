@@ -88,12 +88,14 @@ def s5():
 def s6():
     have = [p for p in FRACTIONS if (SG3 / f"aptos256_{frac_tag(p)}.zip").exists()]
     val = (SG3 / "aptos256_val.zip").exists()
-    return ("DONE" if len(have) == 4 and val else "PARTIAL" if have or val else "TODO"), f"{len(have)}/4 fraction zips, val={val}"
+    if not have and not val:
+        return "SKIP", "zips are built on Kaggle by genai-data-prep (only needed for lab-PC GAN training)"
+    return ("DONE" if len(have) == 4 and val else "PARTIAL"), f"{len(have)}/4 fraction zips, val={val}"
 
 
 def s7():
     m = DATA_ROOT / "kaggle_dataset" / ".uploaded"
-    return ("DONE" if m.exists() else "TODO"), (m.read_text().splitlines()[0] if m.exists() else "not uploaded")
+    return ("DONE", m.read_text().splitlines()[0]) if m.exists() else ("SKIP", "GAN notebooks read genai-data-prep's output instead")
 
 
 def s8():
@@ -146,10 +148,10 @@ STAGES = [
     Stage("S1", "download APTOS", s1, f'"{PY}" -m src.data.download_aptos'),
     Stage("S2", "place IDRiD zip (manual, IEEE DataPort)", s2, None),
     Stage("S3", "crop/resize to 256px", s3, f'"{PY}" -m src.data.prepare_images --source both'),
-    Stage("S4", "dedup + stratified split", s4, f'"{PY}" -m src.data.dedup && "{PY}" -m src.data.split'),
+    Stage("S4", "verify committed split vs train.csv", s4, f'"{PY}" -m src.data.split'),
     Stage("S5", "uint8 cache arrays", s5, f'"{PY}" -m src.data.cache'),
-    Stage("S6", "stylegan3 zips", s6, f'"{PY}" -m src.data.make_sg3_zips'),
-    Stage("S7", "upload private Kaggle dataset", s7, f'"{PY}" -m src.data.kaggle_dataset'),
+    Stage("S6", "stylegan3 zips (optional)", s6, f'"{PY}" -m src.data.make_sg3_zips'),
+    Stage("S7", "upload private Kaggle dataset (optional)", s7, f'"{PY}" -m src.data.kaggle_dataset'),
     Stage("S8", "classifier runs, conditions 1-5 (60)", s8, f'"{PY}" -m src.classify.queue'),
     Stage("S9", "import synthetic images from Kaggle (manual fetch)", s9, f'"{PY}" -m src.gan.import_synth <downloads/synth_f*.zip>'),
     Stage("S10", "classifier runs, condition 6 (24)", s10, f'"{PY}" -m src.classify.queue --condition 6'),

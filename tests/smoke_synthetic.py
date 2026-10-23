@@ -89,6 +89,9 @@ def main() -> None:
     run([py, "-m", "src.data.split"], env)
     sp = pd.read_csv(splits / "aptos_splits.csv")
     assert len(sp) == N_APTOS - len(dropped) and set(sp.split) == {"train", "val", "test"}
+    assert not any("grade" in c for c in (*sp.columns, *dropped.columns)), "committed CSVs must not carry APTOS labels"
+    p = run([py, "-m", "src.data.split"], env)
+    assert "verified against train.csv" in p.stdout, p.stdout
     run([py, "-m", "src.data.cache"], env)
     assert np.load(data / "cache" / "aptos256.npy", mmap_mode="r").shape == (len(sp), 256, 256, 3)
     run([py, "-m", "src.data.make_sg3_zips"], env)
@@ -118,6 +121,7 @@ def main() -> None:
     assert len(res) == 6 and set(res.dataset) == {"aptos_test", "idrid"}, res
     assert (res[res.condition == 6].n_synth > 0).all()
     assert len(list((results / "preds").glob("*.csv"))) == 6
+    assert all("y_true" not in pd.read_csv(f, nrows=1).columns for f in (results / "preds").glob("*.csv"))
     assert (ckpt / "c6_f100_r1_s0" / "best.pt").exists() and not (ckpt / "c5_f100_r0_s0").exists()
 
     run([py, "-m", "src.analysis.aggregate", "--runs-csv", str(results / "classifier_runs.csv"), "--out-dir", str(results / "tables"),

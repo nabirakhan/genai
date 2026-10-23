@@ -12,6 +12,13 @@ kaggle.json
 .env.*
 !.env.example
 
+# APTOS may not be redistributed and the repo is public: outputs that show real APTOS images
+# or per-image APTOS labels stay local (the report PDF uses them)
+/results/figures/gradcam_*
+/results/figures/memorization_*
+/results/tables/memorization_f*.csv
+/results/tables/rps_scores.csv
+
 # python
 __pycache__/
 *.pyc

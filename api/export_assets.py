@@ -72,6 +72,7 @@ def main(pkl, upload, bank_per_grade):
         from huggingface_hub import HfApi
         api = HfApi(token=os.environ.get("HF_TOKEN"))
         api.create_repo(upload, repo_type="model", private=True, exist_ok=True)
+        api.update_repo_settings(upload, repo_type="model", private=True)  # nn_thumbs.zip holds every f100 train image
         api.upload_folder(repo_id=upload, folder_path=str(OUT), repo_type="model")
         click.echo(f"uploaded to https://huggingface.co/{upload}")
 

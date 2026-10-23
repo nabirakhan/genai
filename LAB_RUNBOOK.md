@@ -7,6 +7,7 @@ you are. Record anything that did not work as documented under **Field notes** a
 
 Rules
 - Never commit data, `*.npy`, `*.pkl`, `*.pt`, `kaggle.json`. Only `splits/`, `results/`, `web/public/results/`, code and docs.
+- The repo is public and APTOS may not be redistributed: never commit APTOS labels (grades per image id) or images of real APTOS eyes. The code already keeps grades out of `splits/` and `results/preds/`, and `.gitignore` holds back the `gradcam_*` and `memorization_*` figures, the per-image `memorization_f*.csv` tables and `rps_scores.csv` (only `memorization_summary.csv` is committed).
 - Do not change the locked research design in CLAUDE.md. If a stage needs a design decision, stop and write it in Field notes.
 - Never start a job that cannot checkpoint within 10 minutes. The classifier queue checkpoints every epoch.
 - Run the end-of-session block before leaving, even mid-queue.
@@ -62,27 +63,30 @@ Download *B. Disease Grading* from IEEE DataPort (free login) on any machine and
 `python -m src.data.prepare_images --source both`
 Expected: `aptos256` has 3,662 PNGs, `idrid256` has 516, `splits/idrid_test.csv` written, grade counts printed.
 
-## S4 Dedup + split (~1 min)
+## S4 Verify the committed split (~10 s)
+
+The split was made on Kaggle by the `genai-data-prep` notebook (vessel-correlation dedup, then the
+stratified split); the GAN zips were built from it, so the classifier must use exactly the same file.
+`splits/aptos_splits.csv` and `splits/aptos_dedup_dropped.csv` are already in git, without grades.
 
 ```powershell
-python -m src.data.dedup          # writes splits/aptos_dedup_dropped.csv, prints how many dropped
-python -m src.data.split          # writes splits/aptos_splits.csv, prints grade x split table and fraction counts
-git add splits && git commit -m "Add APTOS dedup list, splits and IDRiD labels" && git push
+python -m src.data.split          # joins grades from raw\aptos\train.csv and verifies; never pass --force
+git add splits\idrid_test.csv && git commit -m "Add IDRiD test labels" && git push   # written by S3; CC BY 4.0, fine to commit
 ```
 
-Expected: about 140 duplicate copies dropped plus about 40 originals whose copies carry a different grade (≈3,480 images remain); train share per grade ≈ 0.70; fractions nested (asserted). These CSVs are the single source of truth for every machine; never regenerate them with a different seed.
+Expected: `verified against train.csv, not regenerating`, 3,484 rows, and these train counts:
+f100 `{0: 1257, 1: 236, 2: 644, 3: 116, 4: 185}`; f010 keeps 12 / 19 of grades 3 / 4, f025 29 / 47, f050 58 / 93.
+Do not run `src.data.dedup` or `split --force` here: a re-run on different crops could shift a
+borderline pair and silently move test images into the GAN's training set.
 
 ## S5 Cache (~1 min)
 
 `python -m src.data.cache` → `cache/aptos256.npy` (~710 MB) and `cache/idrid256.npy` (~100 MB).
 
-## S6 stylegan3 zips (~2 min)
+## S6 / S7 stylegan3 zips + Kaggle dataset (optional, status SKIP)
 
-`python -m src.data.make_sg3_zips` → `sg3/aptos256_f010.zip … f100.zip, aptos256_val.zip`, each with `dataset.json`. Asserts no test image is included.
-
-## S7 Kaggle dataset upload (~10 min, 1.5 GB)
-
-`python -m src.data.kaggle_dataset` creates the private dataset `<user>/aptos-dr-256-genai` (or a new version). Expected: a URL printed and `C:\genai-data\kaggle_dataset\.uploaded` written. Kaggle notebooks attach this dataset.
+Not needed: the Kaggle `genai-data-prep` notebook builds the zips and the GAN notebooks read its
+output. Run `python -m src.data.make_sg3_zips` only for lab-PC GAN training (see the optional section below).
 
 ## S8 Classifier runs, conditions 1–5 (60 runs, ~4 h total, resumable)
 
@@ -99,7 +103,7 @@ Checks after a few runs: `python -m src.analysis.aggregate` prints the macro-F1 
 
 ```powershell
 mkdir downloads; kaggle kernels output <user>/<eval-notebook-slug> -p downloads
-python -m src.gan.import_synth downloads\synth_f010.zip downloads\synth_f025.zip downloads\synth_f050.zip downloads\synth_f100.zip
+python -m src.gan.import_synth downloads\synth_f010-ada.zip downloads\synth_f025-ada.zip downloads\synth_f050-ada.zip downloads\synth_f100-ada.zip
 Copy-Item downloads\gan_metrics.csv results\gan_metrics.csv
 ```
 
@@ -124,7 +128,7 @@ git add results web/public/results && git commit -m "Results: tables, CIs, figur
 
 ## S13 Retinal Pigmentation Score
 
-Needs Docker (`arajesh17/rps`, CPU, torch 1.7). Run it where Docker exists (laptop overnight is fine):
+Needs Docker (`arajesh17/rps`, CPU, torch 1.7). `stage` needs `aptos256\` and `raw\aptos\train.csv` (grades are joined from it), so run `stage` on the lab PC and copy `<GENAI_DATA>\rps` to the Docker machine (laptop overnight is fine); `run` and `merge` need neither:
 ```powershell
 python -m src.analysis.rps stage --per-grade 300     # copies PNGs + manifest to <GENAI_DATA>\rps
 python -m src.analysis.rps run --dry-run             # shows the docker command; run without --dry-run (hours)
@@ -181,7 +185,7 @@ far too slow to be useful.
 
 ## Fallbacks
 
-- Lab time short: the classifier runs unchanged on Kaggle T4 (~8 min/run). Add `cache/*.npy` + `splits/` to the Kaggle dataset and run `python -m src.classify.queue` in a notebook with `GENAI_DATA=/kaggle/input/...` (read-only: set `GENAI_RESULTS`/`GENAI_CHECKPOINTS` to `/kaggle/working/...`).
+- Lab time short: the classifier runs unchanged on Kaggle T4 (~8 min/run). Attach the data-prep output (run with `MAKE_CACHE = True`) and the APTOS competition, copy the competition's `train.csv` to `<GENAI_DATA>/raw/aptos/train.csv` (grades are joined from it; they are not in `splits/`), and run `python -m src.classify.queue` with `GENAI_DATA` on a writable copy (set `GENAI_RESULTS`/`GENAI_CHECKPOINTS` to `/kaggle/working/...`).
 - No CUDA on the lab PC: install the NVIDIA driver; if impossible, use the Kaggle fallback above.
 - `prepare_images` slow: it is CPU-bound on PNG decode; ~3 min with 18 workers is normal.
 

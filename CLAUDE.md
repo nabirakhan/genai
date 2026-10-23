@@ -11,7 +11,7 @@ Severe DR (grades 3, 4) is rare in training data, so classifiers miss it. Test w
 ## Locked design (do not change without asking)
 - **Generator:** class-conditional StyleGAN2-ADA on **all 5 grades** (rare grades borrow structure from grades 0–2). Code: `NVlabs/stylegan3` with `--cfg=stylegan2 --aug=ada --cond=1`, 256×256, fine-tuned from the released FFHQ-256 StyleGAN2 checkpoint (class-embedding layer newly initialised; `--cbase=16384 --cmax=512 --map-depth=8`). Not the old `stylegan2-ada-pytorch` (breaks on new PyTorch / Ada GPUs).
 - **Data:** APTOS 2019 (3,662 imgs; grade counts 1805/370/999/193/295) for training. IDRiD disease-grading set (516 imgs, CC BY 4.0) as **external test only**, never trained or tuned on.
-- **Split:** stratified 70/15/15 train/val/test, seed 42. Duplicate removal *before* splitting so copies never straddle splits: shift-tolerant vessel-pattern correlation ≥ 0.90, no transitive chaining, copies with conflicting grades dropped together (`src/data/dedup.py`; pHash was tried first and rejected, it chained 1,242 distinct eyes into "duplicates", see `src/data/dedup_audit.py`). Test split never touches the GAN. The committed `splits/*.csv` are the source of truth on every machine.
+- **Split:** stratified 70/15/15 train/val/test, seed 42. Duplicate removal *before* splitting so copies never straddle splits: shift-tolerant vessel-pattern correlation ≥ 0.90, no transitive chaining, copies with conflicting grades dropped together (`src/data/dedup.py`; pHash was tried first and rejected, it chained 1,242 distinct eyes into "duplicates", see `src/data/dedup_audit.py`). Test split never touches the GAN. The committed `splits/*.csv` are the source of truth on every machine: written by the Kaggle `genai-data-prep` notebook (which built the GAN zips from them), they hold image ids, split and a grade-blind `frac_rank` only, never labels (APTOS terms, public repo); `load_splits()` joins grades from the local `raw/aptos/train.csv`.
 - **Fractions:** 10/25/50/100% of grade 3+4 training images; grades 0–2 always kept in full. Subsets **nested** (10 ⊂ 25 ⊂ 50 ⊂ 100), fixed seed. One GAN per fraction, trained only on that fraction's train split, same kimg budget for all.
 - **Classifier conditions (6):** (1) none, (2) class weights, (3) oversampling, (4) classical aug (flip/rotate/color jitter), (5) RandAugment + mixup, (6) = (5) + GAN images of grades 3/4 at 1× real rare-grade count.
 - **Synthetic-ratio sweep:** condition (6) also at 0.5× and 2×, only at fractions 10% and 100%.
@@ -24,8 +24,8 @@ Severe DR (grades 3, 4) is rare in training data, so classifiers miss it. Test w
 ## Where things run
 | Machine | Use for |
 |---|---|
-| **Kaggle T4 x2** (internet on) | All GAN training (5 runs: 4 fractions + no-ADA ablation), FID/KID, image generation. `notebooks/kaggle_gan_train.ipynb` resumes across sessions from the previous version's output. |
-| **Lab PC** (Windows 11, RTX 4000 Ada 20 GB) | Everything else: data prep, Kaggle dataset upload, the 84 classifier runs, IDRiD eval, analysis, memorisation, Grad-CAM, demo-asset export. **Follow `LAB_RUNBOOK.md` stage by stage**; `python -m src.pipeline status` shows progress. |
+| **Kaggle** (account k230914nabirakhan, private notebooks) | `genai-data-prep` (CPU): dedup, split, GAN zips. `genai-gan-train` (T4 x2, internet on): all GAN training (5 runs: 4 fractions + no-ADA ablation), resuming across sessions from its previous version's output. `genai-gan-eval`: FID/KID, image generation. |
+| **Lab PC** (Windows 11, RTX 4000 Ada 20 GB) | APTOS/IDRiD download, crop, cache (the split comes from git), the 84 classifier runs, IDRiD eval, analysis, memorisation, Grad-CAM, demo-asset export. **Follow `LAB_RUNBOOK.md` stage by stage**; `python -m src.pipeline status` shows progress. |
 | **Nabira's laptop** (no NVIDIA GPU) | Code, CPU smoke tests, notebooks, report, RPS via Docker, frontend design. |
 | **HF Space** (Docker, free CPU) + **Vercel** | Demo: `api/` inference service, `web/` React frontend. |
 
@@ -84,7 +84,8 @@ EfficientNet-B0 (timm, ImageNet weights), 256px, fp16 AMP, batch 64, AdamW 3e-4 
 - numpy's OpenBLAS can fail to allocate thread buffers when several processes start together; `src/__init__.py` caps `OPENBLAS_NUM_THREADS` before numpy loads.
 - stylegan3 resume from an unconditional pickle needs the shape-tolerant copy patch (fc0 and D.b4.out mismatch); verified on CPU by `scripts/check_resume_compat.py`.
 - Windows shell commands over ~8k characters fail (cmd.exe limit); write files with the editor tools, not giant heredocs.
-- APTOS may not be redistributed: the public demo returns nearest-neighbour thumbnails ≤96 px + image id only.
+- APTOS may not be redistributed and the repo is public: the demo returns nearest-neighbour thumbnails ≤96 px + image id only; committed CSVs and `results/preds/` carry no APTOS labels (joined at analysis time); figures showing real APTOS images (`gradcam_*`, `memorization_*`), the per-image `memorization_f*.csv` tables (nearest neighbours are same-grade, so ids imply grades) and `rps_scores.csv` are gitignored and used only in the report PDF.
+- Kaggle runs Python 3.13 + PyTorch 2.11: stylegan3 needs patches 0002 (distutils/pkg_resources imports), 0003 (custom-op module loading) and 0004 (InfiniteSampler calls `Sampler.__init__()` without data_source), see `third_party/PATCHES.md`.
 
 ## How to help me
 I learn fast — explain once. Give the fix directly, then why. Flag security issues. Optimise for memory and speed. No unnecessary boilerplate or comments.
