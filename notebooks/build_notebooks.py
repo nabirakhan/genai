@@ -24,7 +24,8 @@ os.chdir(CODE)
 subprocess.run([sys.executable, "scripts/apply_patches.py"], check=True)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "click", "requests", "tqdm", "ninja",
                 "imageio-ffmpeg", "psutil", "scipy", "pyspng"], check=True)
-print(subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv"], capture_output=True, text=True).stdout)
+if shutil.which("nvidia-smi"):
+    print(subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv"], capture_output=True, text=True).stdout)
 import torch; print("torch", torch.__version__, "gpus", torch.cuda.device_count())
 def sh(cmd, **kw):
     print("$", " ".join(cmd)); return subprocess.run(cmd, check=True, **kw)
