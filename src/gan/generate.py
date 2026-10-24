@@ -63,8 +63,8 @@ def generate_one(G, seed: int, grade: int, psi: float, device: torch.device,
 @click.option("--n", type=int, default=500)
 @click.option("--psi", type=float, default=0.8)
 @click.option("--tag", default="", help="generator tag written into metadata, e.g. f100-ada")
-@click.option("--trunc-center", type=click.Choice(["global", "class"]), default="global", show_default=True,
-              help="truncate towards G's single w_avg (stylegan3 default) or towards each grade's mean w")
+@click.option("--trunc-center", type=click.Choice(["global", "class"]), default="class", show_default=True,
+              help="towards each grade's mean w (conditional truncation, used in the study) or G's single w_avg")
 def main(pkl, outdir, classes, n, psi, tag, trunc_center):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     G = load_G(pkl, device)

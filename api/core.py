@@ -61,6 +61,7 @@ class Backend:
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         torch.set_num_threads(max(1, os.cpu_count() or 1))
         self.G = self.models = self.nn_feats = self.nn_ids = None
+        self.centers: dict[int, torch.Tensor] = {}  # per-grade truncation centres, as for the training images
         self.bank = sorted((self.assets / "bank").glob("*.png")) if (self.assets / "bank").exists() else []
 
     # ---- lazy loaders -------------------------------------------------------------------
@@ -102,11 +103,16 @@ class Backend:
     # ---- public ops ------------------------------------------------------------------------
     @torch.no_grad()
     def generate(self, grade: int, seed: int, psi: float = 0.8) -> Image.Image:
+        from src.gan.generate import class_w_avg
         G = self._g()
+        if grade not in self.centers:
+            self.centers[grade] = class_w_avg(G, grade, self.device)
         z = torch.from_numpy(np.random.RandomState(seed).randn(1, G.z_dim)).to(self.device)
         c = torch.zeros([1, G.c_dim], device=self.device)
         c[0, grade] = 1
-        img = G(z, c, truncation_psi=psi, noise_mode="const", force_fp32=True)
+        ws = G.mapping(z, c, truncation_psi=1)
+        center = self.centers[grade]
+        img = G.synthesis(center + psi * (ws - center), noise_mode="const", force_fp32=True)
         img = (img.permute(0, 2, 3, 1) * 127.5 + 128).clamp(0, 255).to(torch.uint8)[0].cpu().numpy()
         return Image.fromarray(img, "RGB")
 

@@ -84,7 +84,7 @@ metadata, overall FID/KID vs the val split (`calc_metrics.py`) and per-class FID
 Lab PC: `kaggle kernels output <user>/<this-notebook> -p downloads/`, then `python -m src.gan.import_synth downloads/synth_f*.zip`."""),
     ("code", f'''REPO = "{REPO_URL}"
 N_PER_CLASS, PSI, CLASSES = 500, 0.8, "3,4"
-TRUNC_CENTER = "global"   # "global" = stylegan3 w_avg (mostly grade 0) | "class" = each grade's mean w
+TRUNC_CENTER = "class"    # conditional truncation towards each grade's mean w (study setting); "global" = stylegan3 w_avg, mostly grade 0
 ONLY_TAGS = None          # e.g. ["f100-ada"]; None = every GAN that reached the session kimg budget
 GPUS = 2'''),
     ("code", SETUP),
