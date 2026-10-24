@@ -217,8 +217,8 @@ def applied_magnitude(res: Path, adopted: bool) -> None:
 def check_order_guards():
     write_config(9, "")
     res = world("magnitude", BASE, PLUS(0.05))
-    out = invoke(queue.main, ["--dry-run", "--results-csv", res])  # grid: no c5/c6 before the checks are applied
-    assert "wait for the pre-registered check(s): magnitude (S8a), psi (S10a)" in out and "\n  c5_" not in out, out
+    out = invoke(queue.main, ["--dry-run", "--results-csv", res])  # grid: nothing runs before the magnitude decision
+    assert "wait for the pre-registered check(s): magnitude (S8a), psi (S10a)" in out and "\n  c" not in out, out
     out = invoke(queue.main, ["--checks", "psi", "--dry-run", "--results-csv", res], ok=False)
     assert "run S8a first" in out, out
     invoke(checks.main, ["magnitude", "--apply", "--results-csv", res])  # adopts 15

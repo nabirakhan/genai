@@ -19,6 +19,7 @@ mirrored copy. The held-out reference is scored the same way.
 results/tables/memorization_summary.csv   per set and grade, aggregate counts only (committed)
 results/tables/memorization_<set>.csv     per synthetic image with nearest-neighbour ids (gitignored)
 results/figures/memorization_<set>.png    closest pairs + every vessel match (gitignored: real APTOS eyes)
+results/tables/memorization_<set>_pairs.csv  one row per figure panel: the drawn pair and its own scores (gitignored)
 Needs cache/aptos256.npy (S5) and the aptos256/ PNGs (S3); Inception features of the train+val
 images are cached in cache/inception_trainval.npy.
 """
@@ -84,6 +85,16 @@ def vessel_best(fq: np.ndarray, ft: np.ndarray, cand: np.ndarray) -> tuple[np.nd
     return np.where(flip, s2, s1), np.where(flip, a2, a1), flip
 
 
+def pair_vessel(q: np.ndarray, r: np.ndarray) -> float:
+    """Vessel correlation of one drawn pair, either orientation (as vessel_best)."""
+    return max(aligned_corr(q, r), aligned_corr(np.ascontiguousarray(q[:, ::-1]), r))
+
+
+def pair_dist(a: np.ndarray, a_flip: np.ndarray, b: np.ndarray) -> float:
+    """Cosine distance of one drawn pair, closer orientation (as nearest_mirrored)."""
+    return max(0.0, float(nearest(np.stack([a, a_flip]), b[None], 1)[0].min()))
+
+
 def real_features(arr: np.ndarray, ids: np.ndarray, rows: np.ndarray, detector, device, kind: str) -> np.ndarray:
     path = CACHE / f"{kind}_trainval.npy"
     ids_path = path.with_suffix(".ids.txt")
@@ -105,7 +116,7 @@ def pair_figure(name: str, pairs: list, arr: np.ndarray, out: Path) -> None:
     fig, axes = plt.subplots(2, len(pairs), figsize=(1.3 * len(pairs), 3.3), squeeze=False)
     for k, (f, j, d, v, g, how) in enumerate(pairs):
         axes[0, k].imshow(np.asarray(add_visible_label(Image.open(f).convert("RGB"))))
-        axes[0, k].set_title(f"g{g} d={d:.3f}\nvessel {v:.2f}\n{how}", fontsize=5)
+        axes[0, k].set_title(f"g{g} d={max(d, 0.0):.3f}\nvessel {v:.2f}\n{how}", fontsize=5)
         axes[1, k].imshow(np.ascontiguousarray(arr[j]))
         for a in axes[:, k]:
             a.set_xticks([])
@@ -164,9 +175,11 @@ def main(sets, detector_kind):
             if not files:
                 continue
             imgs = [np.asarray(Image.open(f).convert("RGB")) for f in files]
-            d, i, mir, cand = nearest_mirrored(batch_features(imgs, detector, device),
-                                               batch_features([np.ascontiguousarray(a[:, ::-1]) for a in imgs], detector, device), ft)
-            v, vi, vmir = vessel_best(np.stack([vessel_field(f) for f in files]), vt, cand)
+            fs = batch_features(imgs, detector, device)
+            fs_flip = batch_features([np.ascontiguousarray(a[:, ::-1]) for a in imgs], detector, device)
+            d, i, mir, cand = nearest_mirrored(fs, fs_flip, ft)
+            fq = np.stack([vessel_field(f) for f in files])
+            v, vi, vmir = vessel_best(fq, vt, cand)
             nn, dist = train[i[:, 0]], d[:, 0]
             rows += [dict(file=f.name, grade=g, nn_image_id=ids[a], nn_dist=round(float(b), 5), nn_mirrored=bool(m),
                           below_p1=bool(b < p1), below_p5=bool(b < p5), vessel_corr=round(float(c), 4),
@@ -180,11 +193,15 @@ def main(sets, detector_kind):
                                 max_vessel=round(float(v.max()), 4), ref_max_vessel=round(float(ref_v.max()), 4),
                                 n_mirrored_nn=int(mir.sum())))
             closest = list(np.argsort(dist)[:5])
-            pairs += [(files[k], nn[k], dist[k], v[k], g, "nearest" + (" (mirrored)" if mir[k] else "")) for k in closest]
-            pairs += [(files[k], train[vi[k]], dist[k], v[k], g, "vessel match" + (" (mirrored)" if vmir[k] else ""))
-                      for k in np.where((v >= VESSEL_COPY) | (v > ref_v.max()))[0]]
+            pairs += [(files[k], nn[k], dist[k], pair_vessel(fq[k], vt[i[k, 0]]), g, "nearest" + (" (mirrored)" if mir[k] else ""))
+                      for k in closest]
+            pairs += [(files[k], train[vi[k]], pair_dist(fs[k], fs_flip[k], ft[vi[k]]), v[k], g,
+                       "vessel match" + (" (mirrored)" if vmir[k] else "")) for k in np.where((v >= VESSEL_COPY) | (v > ref_v.max()))[0]]
         pd.DataFrame(rows).to_csv(out_t / f"memorization_{name}.csv", index=False)
         if pairs:
+            pd.DataFrame([dict(file=f.name, grade=g, panel=how, real_image_id=ids[j], pair_dist=round(float(d), 5),
+                               pair_vessel=round(float(v), 4)) for f, j, d, v, g, how in pairs]
+                         ).to_csv(out_t / f"memorization_{name}_pairs.csv", index=False)
             pair_figure(name, pairs, arr, out_f / f"memorization_{name}.png")
     new = pd.DataFrame(summary)
     path = out_t / "memorization_summary.csv"

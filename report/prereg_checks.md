@@ -49,8 +49,8 @@ present and the two arms differ in nothing but the tested setting.
    after the decision is committed.
 2. Check 2 runs after S9 (synthetic images imported) and before S10 (S10a).
 
-Enforced in code: the main queue holds condition-5/6 runs until check 1 is applied and condition-6 runs until
-check 2 is applied; check 2 refuses to run or decide before check 1 is applied; every queue refuses to start if
+Enforced in code: the main queue holds every run until check 1 is applied and condition-6 runs until check 2
+is applied; check 2 refuses to run or decide before check 1 is applied; every queue refuses to start if
 `config.json` disagrees with an applied decision; an applied decision is never rewritten.
 
 ## Data use

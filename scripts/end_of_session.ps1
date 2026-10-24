@@ -8,6 +8,7 @@ Set-Location $repo
 
 Write-Host "== committing tracked outputs =="
 git add splits results web/public/results LAB_RUNBOOK.md src/classify/config.json 2>$null
+if ($LASTEXITCODE -ne 0) { $ok = $false; Write-Host "!! git add failed (stale .git\index.lock?): run git add again to see why" -ForegroundColor Red }
 $staged = git diff --cached --name-only
 if ($staged) {
     $n = (Get-Content results/classifier_runs.csv -ErrorAction SilentlyContinue | Measure-Object -Line).Lines
@@ -22,6 +23,7 @@ if (-not $NoPush) {
     if ($LASTEXITCODE -ne 0) { $ok = $false; Write-Host "!! git push failed: results exist only on this PC" -ForegroundColor Red }
     if (git status --porcelain=v1 --branch | Select-String "ahead") { $ok = $false; Write-Host "!! commits not on origin" -ForegroundColor Red }
 }
+if (git status --porcelain -- splits results web/public/results LAB_RUNBOOK.md src/classify/config.json) { $ok = $false; Write-Host "!! outputs not committed" -ForegroundColor Red }
 git status --short
 
 Write-Host "== removing credentials =="

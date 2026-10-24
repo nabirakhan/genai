@@ -46,9 +46,12 @@ python -m src.pipeline status                 # S0..S15 with DONE/PARTIAL/TODO
 # Kaggle: notebooks/kaggle_data_prep.ipynb (dedup, split, GAN zips) -> commit its splits/*.csv
 python -m src.data.download_aptos && python -m src.data.prepare_images && python -m src.data.split   # split: verify only
 python -m src.data.cache
-python -m src.classify.queue                  # 84 runs, skips finished ones, resumable
+python -m src.classify.queue --checks magnitude && python -m src.analysis.checks magnitude --apply   # S8a, pre-registered (report/prereg_checks.md)
+python -m src.classify.queue                  # conditions 1-5 (the queue holds everything until S8a), skips finished runs, resumable
 # Kaggle: kaggle_gan_train.ipynb, one ~10 h version per session (src/gan/kaggle_train.py queue: f100 -> f010 -> f010-noaug -> f025 -> f050), then kaggle_gan_eval.ipynb
 python -m src.gan.import_synth downloads/synth_f*.zip
+python -m src.classify.queue --checks psi && python -m src.analysis.checks psi --apply               # S10a, pre-registered
+python -m src.classify.queue                  # condition 6 (84 runs in all)
 python -m src.analysis.aggregate && python -m src.analysis.bootstrap && python -m src.analysis.plots
 ```
 

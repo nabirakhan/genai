@@ -48,6 +48,14 @@ def fake_eye(rng: np.random.Generator) -> np.ndarray:
     return np.where(disc[..., None], img, 0).astype(np.uint8)
 
 
+def hybrid_eye(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """b's red and blue channels (most of what the stub features see) with a green channel that is 60% a's (the
+    vessel field reads green only): its best vessel match is a, its feature-nearest eye is not."""
+    out = b.copy()
+    out[..., 1] = (0.6 * a[..., 1].astype(np.float32) + 0.4 * b[..., 1]).round().astype(np.uint8)
+    return out
+
+
 def kid_checks() -> None:
     from src.gan.metrics_per_class import kid, poly_kernel
 
@@ -140,6 +148,7 @@ def main() -> None:
     df, arr = make_data(data, splits, rng)
     train3 = df[(df.split == "train") & (df.grade == 3)].index[0]
     train4 = df[(df.split == "train") & (df.grade == 4)].index[0]
+    eye_a, eye_b = df[(df.split == "train") & (df.grade == 0)].index[:2]
 
     # fraction_table: nested rare-grade counts, grades 0-2 always full
     run(["-m", "src.analysis.fraction_table"], env)
@@ -154,13 +163,15 @@ def main() -> None:
             4: [np.ascontiguousarray(arr[train4][:, ::-1])] + [fake_eye(rng) for _ in range(5)]}  # and a mirrored one
     synth_zip(dl / "synth_f100-ada.zip", f100, 0.8)
     synth_zip(dl / "synth_f100-ada_psi1.zip", {g: [fake_eye(rng) for _ in range(4)] for g in (3, 4)}, 1.0)
-    synth_zip(dl / "synth_f010-ada.zip", {g: [fake_eye(rng) for _ in range(4)] for g in (3, 4)}, 0.8)
+    f010 = {g: [fake_eye(rng) for _ in range(4)] for g in (3, 4)}
+    f010[3].append(hybrid_eye(arr[eye_a], arr[eye_b]))  # vessels of eye_a, features of eye_b
+    synth_zip(dl / "synth_f010-ada.zip", f010, 0.8)
     synth_zip(dl / "synth_f010-noaug.zip", {g: [fake_eye(rng) for _ in range(2)] for g in (3, 4)}, 0.8)
     zips = [dl / f"synth_{t}.zip" for t in ("f100-ada", "f100-ada_psi1", "f010-ada", "f010-noaug")]
     out = run(["-m", "src.gan.import_synth", *zips], env)
     synth = data / "synth"
     assert "skip synth_f010-noaug.zip" in out and sorted(p.name for p in synth.iterdir()) == ["f010", "f100", "f100_psi1"], out
-    assert [len(list((synth / s / g).glob("*.png"))) for s in ("f100", "f100_psi1", "f010") for g in ("g3", "g4")] == [6, 6, 4, 4, 4, 4]
+    assert [len(list((synth / s / g).glob("*.png"))) for s in ("f100", "f100_psi1", "f010") for g in ("g3", "g4")] == [6, 6, 4, 4, 5, 4]
     assert not list(synth.rglob("*.tmp"))
     run(["-m", "src.gan.import_synth", str(dl / "synth_f*.zip")], env)    # idempotent; pattern expanded by the tool
     assert "no synth_f*.zip files match" in run(["-m", "src.gan.import_synth", str(dl / "nothing_*.zip")], env, ok=False)
@@ -231,6 +242,32 @@ def main() -> None:
     assert copy.loc["g3_s00000.png", "vessel_image_id"] == copy.loc["g3_s00000.png", "nn_image_id"] == df.image_id[train3]
     assert not copy.loc["g3_s00000.png", "vessel_mirrored"] and copy.loc["g4_s00000.png", "vessel_mirrored"], copy
     assert copy.loc["g4_s00000.png", "vessel_image_id"] == df.image_id[train4] and copy.loc["g4_s00000.png", "nn_mirrored"], copy
+    from src.data.dedup import aligned_corr, vessel_field
+    from src.gan.metrics_per_class import StubDetector, features
+    det, cpu = StubDetector(), torch.device("cpu")
+
+    def own_scores(s: str, r) -> tuple[float, float]:  # the drawn pair's distance and vessel score, from the files
+        f = synth / s / f"g{r.grade}" / r.file
+        x = np.asarray(Image.open(f).convert("RGB"))
+        fx = features([x, np.ascontiguousarray(x[:, ::-1])], det, cpu)
+        fy = features([arr[df.index[df.image_id == r.real_image_id][0]]], det, cpu)
+        fx, fy = fx / np.linalg.norm(fx, axis=1, keepdims=True), fy / np.linalg.norm(fy, axis=1, keepdims=True)
+        q, t = vessel_field(f), vessel_field(data / "aptos256" / f"{r.real_image_id}.png")
+        return max(0.0, float((1 - fx @ fy.T).min())), max(aligned_corr(q, t), aligned_corr(np.ascontiguousarray(q[:, ::-1]), t))
+
+    ids = {c: str for c in ("real_image_id", "nn_image_id", "vessel_image_id")}
+    pairs = {s: pd.read_csv(results / "tables" / f"memorization_{s}_pairs.csv", dtype=ids).merge(
+        pd.read_csv(results / "tables" / f"memorization_{s}.csv", dtype=ids), on=["file", "grade"]) for s in ("f100", "f010")}
+    for s, p in pairs.items():  # every figure panel carries the scores of the pair it draws
+        own = np.array([own_scores(s, r) for r in p.itertuples()])
+        assert np.allclose(p.pair_dist.clip(lower=0), own[:, 0], atol=1e-4) and np.allclose(p.pair_vessel, own[:, 1], atol=1e-3), (s, p, own)
+        near, ves = p[p.panel.str.startswith("nearest")], p[p.panel.str.startswith("vessel")]
+        assert (near.real_image_id == near.nn_image_id).all() and (ves.real_image_id == ves.vessel_image_id).all(), p
+    near = pairs["f100"][pairs["f100"].panel.str.startswith("nearest")]  # a nearest panel whose best vessel match is another eye
+    assert len(near) == 10 and (near.real_image_id != near.vessel_image_id).any(), near
+    p10 = pairs["f010"]  # and a vessel-match panel whose feature-nearest eye is another eye
+    hyb = p10[(p10.file == "g3_s00004.png") & p10.panel.str.startswith("vessel")]
+    assert len(hyb) == 1 and hyb.real_image_id.item() == df.image_id[eye_a] != hyb.nn_image_id.item(), p10
     assert "unknown synthetic sets ['f100_psi']" in run(["-m", "src.analysis.memorization", "--detector", "stub", "--sets", "f010,f100_psi"], env, ok=False)
     assert all((results / "figures" / f"memorization_{s}.png").exists() for s in ("f010", "f100", "f100_psi1"))
     cache = data / "cache" / "stub_trainval.npy"

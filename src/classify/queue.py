@@ -138,9 +138,9 @@ def main(dry_run, checks, condition, fraction, seed, epochs, workers, batch_size
         r["csv"] = checks_csv if r.get("eval_split") == "val" else results_csv
     pending = [r for r in runs if r["run_id"] not in done[r["csv"]]]
     click.echo(f"{len(runs)} selected, {len(runs) - len(pending)} done, {len(pending)} pending")
-    if not checks:  # pre-registered order: no c5/c6 grid run before the magnitude decision, no c6 before psi
+    if not checks:  # pre-registered order: no grid run before the magnitude decision, no c6 before psi
         mag, psi = decision("magnitude", checks_csv.parent), decision("psi", checks_csv.parent)
-        held = [r for r in pending if (r["condition"] >= 5 and not mag) or (r["condition"] == 6 and not psi)]
+        held = [r for r in pending if not mag or (r["condition"] == 6 and not psi)]
         if held:
             todo_checks = [s for s, ok in (("magnitude (S8a)", mag), ("psi (S10a)", psi)) if not ok]
             click.echo(f"  {len(held)} runs wait for the pre-registered check(s): {', '.join(todo_checks)}")

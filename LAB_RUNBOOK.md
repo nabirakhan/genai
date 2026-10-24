@@ -105,7 +105,7 @@ Expected: the 6 baseline runs are ordinary S8 runs (2 rows each in `results/clas
 ## S8 Classifier runs, conditions 1–5 (60 runs, ~4 h total, resumable, after S8a)
 
 ```powershell
-python -m src.classify.queue --dry-run      # lists pending runs (84 total; condition 6 waits for synthetic images)
+python -m src.classify.queue --dry-run      # lists pending runs (84 total; all wait for S8a, condition 6 also for S10a and synthetic images)
 python -m src.classify.queue                # runs them; Ctrl+C stops after the current run
 ```
 
@@ -226,7 +226,7 @@ far too slow to be useful.
 
 ## Fallbacks
 
-- Lab time short: the classifier runs unchanged on Kaggle T4 (~8 min/run). Attach the data-prep output (run with `MAKE_CACHE = True`) and the APTOS competition, copy the competition's `train.csv` to `<GENAI_DATA>/raw/aptos/train.csv` (grades are joined from it; they are not in `splits/`), and run `python -m src.classify.queue` with `GENAI_DATA` on a writable copy (set `GENAI_RESULTS`/`GENAI_CHECKPOINTS` to `/kaggle/working/...`).
+- Lab time short: the classifier runs unchanged on Kaggle T4 (~8 min/run). Attach the data-prep output (run with `MAKE_CACHE = True`) and the APTOS competition, copy the competition's `train.csv` to `<GENAI_DATA>/raw/aptos/train.csv` (grades are joined from it; they are not in `splits/`), and run the S8a, S8 (later S10a, S10) commands in that order with `GENAI_DATA` on a writable copy (set `GENAI_RESULTS`/`GENAI_CHECKPOINTS` to `/kaggle/working/...`).
 - No CUDA on the lab PC: install the NVIDIA driver; if impossible, use the Kaggle fallback above.
 - `prepare_images` slow: it is CPU-bound on PNG decode; ~3 min with 18 workers is normal.
 
