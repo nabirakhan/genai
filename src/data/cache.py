@@ -4,6 +4,8 @@ cache/aptos256.npy  (N,256,256,3) in the row order of splits/aptos_splits.csv
 cache/idrid256.npy  (M,256,256,3) in the row order of splits/idrid_test.csv
 The classifier opens them with mmap_mode='r', so DataLoader workers share pages.
 """
+import os
+
 import click
 import numpy as np
 import pandas as pd
@@ -14,14 +16,30 @@ from src.data.split import load_splits
 from src.genai.paths import APTOS256, CACHE, IDRID256, IMG_SIZE, SPLITS
 
 
+def ids_file(npy):
+    return npy.with_suffix(".ids.txt")
+
+
+def check_rows(npy, ids) -> None:
+    """The classifier indexes the cache by CSV row: refuse one built from another CSV or never finished."""
+    f = ids_file(npy)
+    if not f.exists() or f.read_text(encoding="utf-8").split() != [str(i) for i in ids]:
+        raise SystemExit(f"{npy} does not match the current CSV row for row ({f.name} missing or different: other CSV, "
+                         "old cache or unfinished build): python -m src.data.cache --force")
+
+
 def build(ids, src_dir, out_path) -> None:
-    arr = np.lib.format.open_memmap(out_path, mode="w+", dtype=np.uint8, shape=(len(ids), IMG_SIZE, IMG_SIZE, 3))
+    ids_file(out_path).unlink(missing_ok=True)  # written last, so it also marks a finished build
+    tmp = out_path.with_name(out_path.stem + ".partial.npy")  # a crash must not leave a zero-filled cache under the real name
+    arr = np.lib.format.open_memmap(tmp, mode="w+", dtype=np.uint8, shape=(len(ids), IMG_SIZE, IMG_SIZE, 3))
     for i, img_id in enumerate(tqdm(ids, desc=out_path.name)):
         im = np.asarray(Image.open(src_dir / f"{img_id}.png").convert("RGB"))
         assert im.shape == (IMG_SIZE, IMG_SIZE, 3), (img_id, im.shape)
         arr[i] = im
     arr.flush()
     del arr
+    os.replace(tmp, out_path)
+    ids_file(out_path).write_text("\n".join(map(str, ids)) + "\n", encoding="utf-8")
 
 
 @click.command()

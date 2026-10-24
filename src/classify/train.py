@@ -10,6 +10,7 @@ predictions to results/preds/{run_id}_{dataset}.csv (used for bootstrap CIs).
 """
 import json
 import math
+import os
 import random
 import shutil
 import subprocess
@@ -31,7 +32,8 @@ from src.genai.paths import CHECKPOINTS, FRACTIONS, RESULTS, frac_tag
 
 RESULTS_CSV = RESULTS / "classifier_runs.csv"
 ROW_COLS = ["run_id", "condition", "condition_name", "fraction", "ratio", "seed", "dataset", *METRIC_COLS,
-            "n_train", "n_synth", "best_epoch", "epochs_run", "best_val_qwk", "train_time_s", "model", "git_sha", "timestamp"]
+            "n_train", "n_synth", "best_epoch", "epochs_run", "best_val_qwk", "train_time_s", "model", "config", "git_sha", "timestamp"]
+KEEP_WEIGHTS = {"c5_f100_r0_s0", "c6_f100_r1_s0"}  # best.pt needed by gradcam (S14) and api.export_assets (S15)
 
 
 def run_id_of(condition: int, fraction: float, ratio: float, seed: int) -> str:
@@ -43,6 +45,26 @@ def seed_all(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def rng_state(gen: torch.Generator) -> dict:
+    return {"python": random.getstate(), "numpy": np.random.get_state(), "torch": torch.get_rng_state(),
+            "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None, "loader": gen.get_state()}
+
+
+def set_rng_state(s: dict, gen: torch.Generator) -> None:
+    random.setstate(s["python"])
+    np.random.set_state(s["numpy"])
+    torch.set_rng_state(s["torch"].cpu())
+    if s["cuda"] is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([t.cpu() for t in s["cuda"]])
+    gen.set_state(s["loader"].cpu())
+
+
+def atomic_save(obj, path: Path) -> None:
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(obj, tmp)
+    os.replace(tmp, path)
 
 
 def git_sha() -> str:
@@ -89,9 +111,13 @@ def append_rows(results_csv: Path, rows: list[dict]) -> None:
     with FileLock(str(results_csv) + ".lock"):
         new = pd.DataFrame(rows, columns=ROW_COLS)
         if results_csv.exists():
-            old = pd.read_csv(results_csv)
+            old = pd.read_csv(results_csv, dtype={"git_sha": str})
+            keys = set(zip(new.run_id, new.dataset))  # --force re-run replaces its old rows
+            old = old[[k not in keys for k in zip(old.run_id, old.dataset)]]
             new = pd.concat([old, new], ignore_index=True)
-        new.to_csv(results_csv, index=False)
+        tmp = results_csv.with_name(results_csv.name + ".tmp")
+        new.to_csv(tmp, index=False)
+        os.replace(tmp, results_csv)
 
 
 @click.command()
@@ -110,26 +136,35 @@ def append_rows(results_csv: Path, rows: list[dict]) -> None:
 @click.option("--no-pretrained", is_flag=True, help="random init (smoke tests only)")
 @click.option("--keep-weights", is_flag=True, help="keep checkpoints/{run_id}/best.pt after the run")
 @click.option("--force", is_flag=True, help="re-run even if results exist")
+@click.option("--allow-missing-idrid", is_flag=True, help="run without the IDRiD external test (the run then never gets an idrid row)")
+@click.option("--allow-cpu", is_flag=True, help="allow training without CUDA (smoke tests only)")
 @click.option("--results-csv", type=click.Path(path_type=Path), default=RESULTS_CSV)
 def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weight_decay, patience, mixup_alpha,
-         model_name, no_pretrained, keep_weights, force, results_csv):
+         model_name, no_pretrained, keep_weights, force, allow_missing_idrid, allow_cpu, results_csv):
     assert any(abs(fraction - f) < 1e-9 for f in FRACTIONS), f"fraction must be one of {FRACTIONS}"
     if ratio is None:
         ratio = 1.0 if condition == 6 else 0.0
     if condition != 6:
         ratio = 0.0
     run_id = run_id_of(condition, fraction, ratio, seed)
+    cfg = dict(epochs=epochs, batch_size=batch_size, lr=lr, weight_decay=weight_decay, patience=patience,
+               mixup_alpha=mixup_alpha, model=model_name, pretrained=not no_pretrained)
     if already_done(results_csv, run_id) and not force:
         click.echo(f"{run_id}: already in {results_csv.name}, skipping (use --force to redo)")
         return
 
     seed_all(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type == "cpu" and not allow_cpu:
+        raise click.ClickException("CUDA not available (driver / torch wheel, see S0): refusing a CPU run; pass --allow-cpu for smoke tests")
     use_amp = device.type == "cuda"
     torch.backends.cudnn.benchmark = True
     t0 = time.time()
 
     loaders, info = make_loaders(condition, fraction, ratio, batch_size, workers, seed)
+    if "idrid" not in loaders and not allow_missing_idrid:
+        raise click.ClickException("IDRiD cache/labels missing (S2, S3, S5): the run would be marked done without "
+                                   "its external-test row and its weights deleted; pass --allow-missing-idrid to override")
     click.echo(f"{run_id}: device={device} train={info['n_train']} synth={info['n_synth']} counts={info['counts']}")
 
     model = create_model(model_name, pretrained=not no_pretrained).to(device).to(memory_format=torch.channels_last)
@@ -150,14 +185,25 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
     ckpt_dir = CHECKPOINTS / run_id
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     last_path, best_path = ckpt_dir / "last.pt", ckpt_dir / "best.pt"
-    start_epoch, best_qwk, best_epoch, bad = 0, -1.0, -1, 0
+    start_epoch, best_qwk, best_epoch, bad, best_state, best_val = 0, -1.0, -1, 0, None, None
     if last_path.exists():
         ck = torch.load(last_path, map_location=device, weights_only=False)
+        if "cfg" in ck and ck["cfg"] != cfg:
+            raise click.ClickException(f"{last_path} was written with {ck['cfg']}, now {cfg}: rerun with the same options or delete it")
         model.load_state_dict(ck["model"])
         opt.load_state_dict(ck["opt"])
         sched.load_state_dict(ck["sched"])
         scaler.load_state_dict(ck["scaler"])
         start_epoch, best_qwk, best_epoch, bad = ck["epoch"] + 1, ck["best_qwk"], ck["best_epoch"], ck["bad"]
+        if "best_model" in ck:
+            best_state, best_val = ck["best_model"], ck["best_val"]
+        else:  # last.pt written before this change keeps its best weights in best.pt
+            b = torch.load(best_path, map_location=device, weights_only=False)
+            best_state, best_val = b["model"], b["val"]
+        if "rng" in ck:  # absent from a last.pt written before this change
+            set_rng_state(ck["rng"], loaders["train"].generator)
+        if bad >= patience:
+            epochs = start_epoch  # it had already early-stopped; only the final evaluation was lost
         click.echo(f"resumed from epoch {start_epoch} (best val QWK {best_qwk:.4f} @ {best_epoch})")
 
     epoch = start_epoch - 1
@@ -187,20 +233,20 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
         improved = val["qwk"] > best_qwk
         if improved:
             best_qwk, best_epoch, bad = val["qwk"], epoch, 0
-            torch.save({"model": model.state_dict(), "epoch": epoch, "val": val, "run_id": run_id,
-                        "model_name": model_name}, best_path)
+            best_state, best_val = {k: v.detach().clone() for k, v in model.state_dict().items()}, val
         else:
             bad += 1
-        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
-                    "scaler": scaler.state_dict(), "epoch": epoch, "best_qwk": best_qwk, "best_epoch": best_epoch,
-                    "bad": bad}, last_path)
+        atomic_save({"model": model.state_dict(), "opt": opt.state_dict(), "sched": sched.state_dict(),
+                     "scaler": scaler.state_dict(), "epoch": epoch, "best_qwk": best_qwk, "best_epoch": best_epoch,
+                     "bad": bad, "best_model": best_state, "best_val": best_val,
+                     "rng": rng_state(loaders["train"].generator), "cfg": cfg}, last_path)
         click.echo(f"ep {epoch:02d} loss {running / max(1, n_b):.4f} val qwk {val['qwk']:.4f} f1 {val['macro_f1']:.4f} "
                    f"r3 {val['recall_3']:.2f} r4 {val['recall_4']:.2f} {'*' if improved else ''}")
         if bad >= patience:
             click.echo("early stop")
             break
 
-    model.load_state_dict(torch.load(best_path, map_location=device, weights_only=False)["model"])
+    model.load_state_dict(best_state)
     train_time = time.time() - t0
     rows = []
     for ds_name in ("aptos_test", "idrid"):
@@ -213,7 +259,7 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
                      "fraction": fraction, "ratio": ratio, "seed": seed, "dataset": ds_name, **m,
                      "n_train": info["n_train"], "n_synth": info["n_synth"], "best_epoch": best_epoch,
                      "epochs_run": epoch + 1, "best_val_qwk": best_qwk, "train_time_s": round(train_time, 1),
-                     "model": model_name, "git_sha": git_sha(), "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+                     "model": model_name, "config": json.dumps(cfg, sort_keys=True), "git_sha": git_sha(), "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         preds = pd.DataFrame({"image_id": info["ids"][ds_name], "y_pred": y_pred})  # labels joined at analysis time
         for k in range(NUM_CLASSES):
             preds[f"p{k}"] = np.round(probs[:, k], 4)
@@ -223,7 +269,9 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
     append_rows(results_csv, rows)
 
     last_path.unlink(missing_ok=True)
-    if keep_weights:
+    if keep_weights or run_id in KEEP_WEIGHTS:
+        atomic_save({"model": best_state, "epoch": best_epoch, "val": best_val, "run_id": run_id,
+                     "model_name": model_name}, best_path)
         click.echo(f"kept {best_path}")
     else:
         shutil.rmtree(ckpt_dir, ignore_errors=True)

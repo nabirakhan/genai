@@ -2,7 +2,8 @@
 #   uv venv .venv --python 3.11
 #   uv pip install --python .venv/Scripts/python.exe -r requirements-lab.txt
 #   uv pip install --python .venv/Scripts/python.exe -e ".[api,dev]"
+# CUDA index only: uv gives --extra-index-url priority (pip takes the highest version), so a PyPI extra
+# index installs PyPI's CPU-only Windows torch. Newest cu128 win_amd64 wheel: torch 2.11.0.
 --index-url https://download.pytorch.org/whl/cu128
---extra-index-url https://pypi.org/simple
-torch
-torchvision
+torch==2.11.0
+torchvision==0.26.0

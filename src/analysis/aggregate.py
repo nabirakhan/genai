@@ -20,7 +20,7 @@ COND_LABELS = {1: "none", 2: "class weights", 3: "oversampling", 4: "classical a
 
 
 def load_runs(path: Path = RESULTS / "classifier_runs.csv") -> pd.DataFrame:
-    df = pd.read_csv(path)
+    df = pd.read_csv(path).drop_duplicates(["run_id", "dataset"], keep="last")  # --force re-runs append; preds/ holds the latest
     df["fraction"] = df.fraction.round(4)
     df["ratio"] = df.ratio.round(4)
     return df
@@ -81,7 +81,8 @@ def ratio_table(df: pd.DataFrame, dataset: str) -> pd.DataFrame:
         for metric in METRICS:
             row[metric] = fmt_ms(grp[metric].mean(), grp[metric].std())
         rows.append(row)
-    return pd.DataFrame(rows).sort_values(["fraction", "ratio"]).reset_index(drop=True)
+    out = pd.DataFrame(rows, columns=["fraction", "ratio", "n", *METRICS])
+    return out.sort_values(["fraction", "ratio"]).reset_index(drop=True)
 
 
 @click.command()

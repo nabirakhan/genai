@@ -18,6 +18,7 @@ from src.genai.paths import (APTOS256, CACHE, CHECKPOINTS, DATA_ROOT, FRACTIONS,
                              RESULTS, SG3, SPLITS, SYNTH, frac_tag)
 
 PY = sys.executable
+SPLIT_DIGEST = "017b5a96eb9b"  # committed splits/aptos_splits.csv (LAB_RUNBOOK S4)
 
 
 def _count(path, pattern) -> int:
@@ -72,12 +73,14 @@ def s3():
 
 
 def s4():
-    d, s = (SPLITS / "aptos_dedup_dropped.csv").exists(), (SPLITS / "aptos_splits.csv").exists()
-    detail = ""
-    if s:
-        df = pd.read_csv(SPLITS / "aptos_splits.csv")
-        detail = f"{len(df)} rows; " + ", ".join(f"{k}={v}" for k, v in df.split.value_counts().items())
-    return ("DONE" if d and s else "PARTIAL" if d or s else "TODO"), detail or "no split CSVs"
+    from src.data.split import digest
+    sp = SPLITS / "aptos_splits.csv"
+    if not sp.exists():
+        return "TODO", "no split CSVs"
+    dg, lab, idr = digest(pd.read_csv(sp)), (RAW_APTOS / "train.csv").exists(), (SPLITS / "idrid_test.csv").exists()
+    ok = dg == SPLIT_DIGEST
+    st = "DONE" if ok and lab and idr else "PARTIAL"
+    return st, f"digest {dg} ({'ok' if ok else 'expected ' + SPLIT_DIGEST}), train.csv={lab}, idrid_test.csv={idr}"
 
 
 def s5():
@@ -159,7 +162,8 @@ STAGES = [
     Stage("S12", "memorisation NN check", s12, f'"{PY}" -m src.analysis.memorization'),
     Stage("S13", "RPS merge (after docker run)", s13, f'"{PY}" -m src.analysis.rps merge'),
     Stage("S14", "Grad-CAM figure", s14, f'"{PY}" -m src.analysis.gradcam'),
-    Stage("S15", "export demo assets", s15, f'"{PY}" -m api.export_assets'),
+    Stage("S15", "export demo assets", s15,
+          f'"{PY}" -m api.export_assets --pkl <GENAI_DATA>/gan_pkls/f100-ada.pkl --upload <hf-user>/dr-gan-demo'),
 ]
 
 

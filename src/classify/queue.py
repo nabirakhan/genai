@@ -18,14 +18,14 @@ import click
 import pandas as pd
 
 from src.classify.data import synth_files
-from src.classify.train import RESULTS_CSV, run_id_of
+from src.classify.train import KEEP_WEIGHTS, RESULTS_CSV, run_id_of
 from src.data.split import fraction_mask, load_splits
 from src.genai.paths import FRACTIONS, RARE_GRADES, frac_tag
 
 SEEDS = (0, 1, 2)
 RATIO_SWEEP = (0.5, 2.0)
 RATIO_SWEEP_FRACTIONS = (0.1, 1.0)
-KEEP_WEIGHTS = {run_id_of(5, 1.0, 0.0, 0), run_id_of(6, 1.0, 1.0, 0)}
+assert KEEP_WEIGHTS == {run_id_of(5, 1.0, 0.0, 0), run_id_of(6, 1.0, 1.0, 0)}
 
 
 def grid() -> list[dict]:
@@ -115,10 +115,21 @@ def main(dry_run, condition, fraction, seed, epochs, workers, batch_size, result
         eta = (sum(durations) / len(durations)) * (len(todo) - i) / 60 if durations else float("nan")
         click.echo(f"\n=== [{i + 1}/{len(todo)}] {r['run_id']}  (ETA {eta:.0f} min) ===")
         t0 = time.time()
+        # own process group/session: the console's Ctrl+C reaches only the queue, which lets the run finish;
+        # poll with sleep because Popen.wait() is not interruptible on Windows
+        grp = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if sys.platform == "win32" else {"start_new_session": True}
+        p = subprocess.Popen(cmd, **grp)
         try:
-            rc = subprocess.run(cmd).returncode
+            while p.poll() is None:
+                time.sleep(0.5)
+            rc = p.returncode
         except KeyboardInterrupt:
-            click.echo("\ninterrupted; the current run can resume from its last.pt next time")
+            click.echo(f"\nCtrl+C: stopping after {r['run_id']} finishes (Ctrl+C again aborts it; it then resumes from last.pt)")
+            try:
+                while p.poll() is None:
+                    time.sleep(0.5)
+            except KeyboardInterrupt:
+                p.kill()
             return
         durations.append(time.time() - t0)
         if rc != 0:

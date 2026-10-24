@@ -4,6 +4,7 @@ Requires kaggle.json in ~/.kaggle (or KAGGLE_USERNAME/KAGGLE_KEY) and the compet
 rules accepted on the website. Idempotent: skips download/extraction already done.
 """
 import subprocess
+import sys
 import zipfile
 
 import click
@@ -41,7 +42,8 @@ def main(skip_download: bool) -> None:
         if skip_download:
             raise SystemExit(f"{zpath} missing and --skip-download given")
         click.echo("Downloading APTOS 2019 (~9.5 GB)...")
-        subprocess.run(["kaggle", "competitions", "download", "-c", COMP, "-p", str(RAW_APTOS)], check=True)
+        subprocess.run([sys.executable, "-m", "kaggle", "competitions", "download", "-c", COMP, "-p", str(RAW_APTOS)],
+                       check=True)  # the venv's kaggle, even when .venv\Scripts is not on PATH
     with zipfile.ZipFile(zpath) as z:
         names = [n for n in z.namelist() if n == "train.csv" or n.startswith("train_images/")]
         for n in tqdm(names, desc="extract"):

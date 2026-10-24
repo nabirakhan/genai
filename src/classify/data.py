@@ -5,7 +5,8 @@ Conditions (locked design):
  2 class_weights   CE weighted by N / (K * n_k) on the fraction's actual train set
  3 oversample      WeightedRandomSampler (1 / n_k), same epoch length as the train set
  4 classical       H/V flip, rotation up to 180 deg, colour jitter
- 5 strong          classical + RandAugment(2, 9) + mixup(alpha 0.4, applied in the train loop)
+ 5 strong          classical + RandAugment(2, 9) + mixup(alpha 0.4, applied in the train loop); torchvision's
+                   magnitude scale has 31 bins, so M=9 is 0.3 of each op's max (about timm 'rand-m3-n2')
  6 strong_gan      strong + synthetic grade-3/4 images at ratio x real rare-grade count
 Val / test / IDRiD are never augmented and never contain synthetic images.
 """
@@ -18,6 +19,7 @@ from PIL import Image
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from torchvision.transforms import v2 as T
 
+from src.data.cache import check_rows
 from src.data.split import fraction_mask, load_splits
 from src.genai.paths import CACHE, GRADES, RARE_GRADES, SPLITS, SYNTH, frac_tag
 
@@ -94,6 +96,7 @@ def make_loaders(condition: int, fraction: float, ratio: float, batch_size: int 
                  seed: int = 0, eval_batch_size: int = 128) -> tuple[dict, dict]:
     df = load_splits()
     arr_path = CACHE / "aptos256.npy"
+    check_rows(arr_path, df.image_id.tolist())
     tr_idx = np.where(fraction_mask(df, fraction))[0]
     tr_y = df.grade.to_numpy()[tr_idx]
     n_real = {g: int((tr_y == g).sum()) for g in RARE_GRADES}
@@ -108,6 +111,7 @@ def make_loaders(condition: int, fraction: float, ratio: float, batch_size: int 
     idrid_ds, idrid_ids = None, None
     if (CACHE / "idrid256.npy").exists() and (SPLITS / "idrid_test.csv").exists():
         idf = pd.read_csv(SPLITS / "idrid_test.csv")
+        check_rows(CACHE / "idrid256.npy", idf.image_id.tolist())
         idrid_ds = FundusDataset(CACHE / "idrid256.npy", np.arange(len(idf)), idf.grade.to_numpy(), eval_tf)
         idrid_ids = idf.image_id.tolist()
 
@@ -124,14 +128,15 @@ def make_loaders(condition: int, fraction: float, ratio: float, batch_size: int 
         class_weights = torch.tensor(len(targets) / (NUM_CLASSES * np.maximum(counts, 1)), dtype=torch.float32)
 
     common = dict(num_workers=workers, pin_memory=torch.cuda.is_available(), persistent_workers=workers > 0)
+    once = dict(num_workers=0, pin_memory=torch.cuda.is_available())  # iterated once per run: 6 spawned workers cost more than they save
     loaders = {
         "train": DataLoader(train_ds, batch_size, shuffle=shuffle, sampler=sampler, generator=gen,
                             drop_last=len(train_ds) >= 2 * batch_size, **common),
         "val": DataLoader(val_ds, eval_batch_size, shuffle=False, **common),
-        "aptos_test": DataLoader(test_ds, eval_batch_size, shuffle=False, **common),
+        "aptos_test": DataLoader(test_ds, eval_batch_size, shuffle=False, **once),
     }
     if idrid_ds is not None:
-        loaders["idrid"] = DataLoader(idrid_ds, eval_batch_size, shuffle=False, **common)
+        loaders["idrid"] = DataLoader(idrid_ds, eval_batch_size, shuffle=False, **once)
     info = dict(n_train=int(len(tr_idx)), n_synth=int(len(synth_p)), counts=counts.tolist(), n_real_rare=n_real,
                 class_weights=class_weights, ids={"aptos_test": df.image_id.to_numpy()[test_idx].tolist(),
                                                   "val": df.image_id.to_numpy()[val_idx].tolist(), "idrid": idrid_ids})

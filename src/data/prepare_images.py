@@ -34,8 +34,8 @@ def _run(jobs: list[tuple[str, str]], workers: int, desc: str) -> None:
         return
     with ProcessPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(_process, s, d) for s, d in jobs]
-        for _ in tqdm(as_completed(futs), total=len(futs), desc=desc):
-            pass
+        for f in tqdm(as_completed(futs), total=len(futs), desc=desc):
+            f.result()  # re-raise worker errors instead of silently dropping the image
 
 
 def prepare_aptos(workers: int) -> None:

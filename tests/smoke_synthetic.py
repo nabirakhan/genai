@@ -111,7 +111,7 @@ def main() -> None:
             save_synthetic(fake_fundus(rng, g, (256, 256)).resize((256, 256)), data / "synth" / "f100" / f"g{g}" / f"g{g}_s{s:05d}.png",
                            visible=False, generator="fake", grade=g, seed=s)
 
-    common = ["--epochs", "1", "--batch-size", "8", "--workers", "0", "--no-pretrained", "--results-csv", str(results / "classifier_runs.csv")]
+    common = ["--epochs", "1", "--batch-size", "8", "--workers", "0", "--no-pretrained", "--allow-cpu", "--results-csv", str(results / "classifier_runs.csv")]
     run([py, "-m", "src.classify.train", "--condition", "3", "--fraction", "1.0", "--seed", "0", *common], env)
     run([py, "-m", "src.classify.train", "--condition", "5", "--fraction", "1.0", "--seed", "0", *common], env)
     run([py, "-m", "src.classify.train", "--condition", "6", "--fraction", "1.0", "--ratio", "1", "--seed", "0", *common, "--keep-weights"], env)
@@ -122,7 +122,7 @@ def main() -> None:
     assert (res[res.condition == 6].n_synth > 0).all()
     assert len(list((results / "preds").glob("*.csv"))) == 6
     assert all("y_true" not in pd.read_csv(f, nrows=1).columns for f in (results / "preds").glob("*.csv"))
-    assert (ckpt / "c6_f100_r1_s0" / "best.pt").exists() and not (ckpt / "c5_f100_r0_s0").exists()
+    assert (ckpt / "c6_f100_r1_s0" / "best.pt").exists() and (ckpt / "c5_f100_r0_s0" / "best.pt").exists() and not (ckpt / "c3_f100_r0_s0").exists()
 
     run([py, "-m", "src.analysis.aggregate", "--runs-csv", str(results / "classifier_runs.csv"), "--out-dir", str(results / "tables"),
          "--web-dir", str(tmp / "web")], env)

@@ -34,9 +34,13 @@ def import_zip(zpath: Path) -> dict[str, int]:
             if not gm:
                 continue
             out = dest / gm.group(1) / Path(name).name
+            data = z.read(name)
+            if out.exists() and out.read_bytes() != data:
+                raise SystemExit(f"{out} differs from {zpath.name}:{name}: {dest} holds images of another generation run. "
+                                 f"Move {dest} away to import these; {tag} condition-6 runs already done used the old ones")
             if not out.exists():
                 out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_bytes(z.read(name))
+                out.write_bytes(data)
             counts[gm.group(1)] = counts.get(gm.group(1), 0) + 1
     for g, n in counts.items():
         sample = sorted((dest / g).glob("*.png"))[:5]

@@ -26,6 +26,7 @@ nvidia-smi
 
 Expected: a table of S0–S15 with DONE / PARTIAL / TODO. Continue at the first non-DONE stage.
 `python -m src.pipeline cmd S4` prints a stage's exact command; `python -m src.pipeline run S4` runs it.
+Claude Code: every shell call is a new process, so `activate` and `$env:` lines do not carry over; run `.venv\Scripts\python.exe ...` (or activate in the same call) and set `HF_TOKEN` in the call that uses it.
 
 ## S0 Environment (once, ~15 min)
 
@@ -41,7 +42,7 @@ uv pip install -e ".[api,dev]"
 python -c "import torch;print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-Expected: `True RTX 4000 Ada Generation`. If `cuda.is_available()` is False: update the NVIDIA driver (GeForce/Studio or RTX enterprise driver ≥ 550), then reinstall torch. No WSL and no CUDA toolkit are needed: GAN training runs on Kaggle, and stylegan3 inference falls back to reference ops.
+Expected: `2.11.0+cu128 True NVIDIA RTX 4000 Ada Generation`. A version without `+cu128` is the CPU wheel from the wrong index, not a driver problem (`uv pip install --reinstall -r requirements-lab.txt` after fixing the file). If it shows `+cu128` but `cuda.is_available()` is False: update the NVIDIA driver (GeForce/Studio or RTX enterprise driver ≥ 550), then reinstall torch. No WSL and no CUDA toolkit are needed: GAN training runs on Kaggle, and stylegan3 inference falls back to reference ops.
 
 Optional speed-up for the data stage: nothing; `prepare_images` uses all cores.
 
@@ -71,7 +72,7 @@ stratified split); the GAN zips were built from it, so the classifier must use e
 
 ```powershell
 python -m src.data.split          # joins grades from raw\aptos\train.csv and verifies; never pass --force
-git add splits\idrid_test.csv && git commit -m "Add IDRiD test labels" && git push   # written by S3; CC BY 4.0, fine to commit
+git add splits\idrid_test.csv; git commit -m "Add IDRiD test labels"; git push   # written by S3; CC BY 4.0, fine to commit
 ```
 
 Expected: `verified against train.csv, not regenerating`, 3,484 rows, digest `017b5a96eb9b`, and these train counts:
@@ -81,7 +82,7 @@ borderline pair and silently move test images into the GAN's training set.
 
 ## S5 Cache (~1 min)
 
-`python -m src.data.cache` → `cache/aptos256.npy` (~710 MB) and `cache/idrid256.npy` (~100 MB).
+`python -m src.data.cache` → `aptos256.npy: shape (3484, 256, 256, 3), 685 MB` and `idrid256.npy: shape (516, 256, 256, 3), 101 MB`.
 
 ## S6 / S7 stylegan3 zips + Kaggle dataset (optional, status SKIP)
 
@@ -119,7 +120,7 @@ Expected: `synth/f{ppp}/g3` and `g4` each with 500 PNGs carrying `Synthetic=true
 python -m src.analysis.aggregate     # results/tables/*.csv|.md + web/public/results/tables.json
 python -m src.analysis.bootstrap     # 95% CIs per run and paired deltas (cond 6 - cond 5)
 python -m src.analysis.plots         # results/figures/*.png (+ copies in web/public/results)
-git add results web/public/results && git commit -m "Results: tables, CIs, figures" && git push
+git add results web/public/results; git commit -m "Results: tables, CIs, figures"; git push   # Windows PowerShell 5.1 has no &&
 ```
 
 ## S12 Memorisation check (~10 min on GPU)
@@ -156,7 +157,7 @@ Remove-Item Env:HF_TOKEN
 # 1. let the current classifier run finish its epoch (Ctrl+C in the queue window waits for the run to end)
 scripts\end_of_session.ps1      # commits splits/ results/ web/public/results, pushes, removes kaggle.json, gh auth logout
 ```
-Check `git status` is clean and `Test-Path $HOME\.kaggle\kaggle.json` is False before leaving.
+Check `git status` is clean, `Get-ChildItem $HOME\.kaggle` shows no `kaggle.json` / `access_token` / `credentials.json`, and `cmdkey /list:git:https://github.com` lists nothing before leaving.
 
 ## Optional: GAN training on the lab PC
 
