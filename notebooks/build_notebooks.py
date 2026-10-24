@@ -40,11 +40,12 @@ every GAN trained to the same total kimg. The logic lives in the repo (`src/gan/
 `notebooks/kaggle_session.json`), so a git push changes the next session while this notebook stays the same.
 
 Before every *Save Version → Save & Run All (Commit)*:
-1. **Input: the genai-data-prep output** whose `splits/aptos_splits.csv` equals the repo's committed split (checked:
-   the f010-f050 zips depend on it, f100 must hold exactly the committed train ids).
-2. **Input: the newest output of this notebook** (snapshots, `final/`, `ledger.json`). Without it the session refuses
-   to start, so nothing restarts from FFHQ by accident (`first_session` in the JSON is only for the very first one).
-3. Settings: Accelerator **GPU T4 x2**, **Internet ON**.
+1. **Input: the genai-data-prep output** (version 4 or later) whose `splits/aptos_splits.csv` equals the repo's committed
+   split (checked: the f010-f050 zips depend on it, f100 must hold exactly the committed train ids).
+2. **Input: the newest output of this notebook** (snapshots, `final/`, `ledger.json`). Inputs are pinned to a version:
+   in the Input panel use **⋮ → Check for updates → Update** on `genai-gan-train` after every finished session.
+   Without any previous output the session refuses to start (`first_session` in the JSON is only for the very first one).
+3. Settings: Accelerator **GPU T4 x2**, **Internet ON**. The runner prints `RUNNER_EXIT 0` when all went well.
 
 The newest version's output always holds every finished GAN (`final/<tag>_kimg<N>.pkl`) plus the running one's
 last two snapshots; the eval notebook attaches only that output."""),
