@@ -6,6 +6,7 @@
 
 Stages map 1:1 to LAB_RUNBOOK.md. Manual stages (S2 IDRiD download, S9 Kaggle fetch) only report.
 """
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -25,12 +26,8 @@ def _count(path, pattern) -> int:
     return len(list(path.glob(pattern))) if path.exists() else 0
 
 
-def _done_runs() -> set[str]:
-    f = RESULTS / "classifier_runs.csv"
-    if not f.exists():
-        return set()
-    df = pd.read_csv(f, usecols=["run_id", "dataset"])
-    return set(df[df.dataset == "aptos_test"].run_id)
+def _done_runs(f=RESULTS / "classifier_runs.csv") -> set[str]:
+    return set(pd.read_csv(f, usecols=["run_id"]).run_id) if f.exists() else set()
 
 
 def _grid_ids(cond6: bool) -> set[str]:
@@ -101,6 +98,22 @@ def s7():
     return ("DONE", m.read_text().splitlines()[0]) if m.exists() else ("SKIP", "GAN notebooks read genai-data-prep's output instead")
 
 
+def _check(name: str) -> tuple[str, str]:
+    d = RESULTS / "checks" / f"decision_{name}.json"
+    if d.exists():
+        j = json.loads(d.read_text(encoding="utf-8"))
+        verdict = f"variant {j['variant']!r} adopted" if j["variant_adopted"] else f"baseline {j['baseline']!r} kept"
+        return ("DONE", verdict) if j["applied"] else ("PARTIAL", f"{verdict}, not applied (--apply)")
+    from src.classify.queue import check_runs
+    done = _done_runs() | _done_runs(RESULTS / "checks" / "classifier_runs.csv")
+    n = sum(r["run_id"] in done for r in check_runs(name))
+    return ("PARTIAL" if n else "TODO"), f"{n}/12 check runs"
+
+
+def s8a():
+    return _check("magnitude")
+
+
 def s8():
     done = _done_runs() & _grid_ids(False)
     return ("DONE" if len(done) == 60 else "PARTIAL" if done else "TODO"), f"{len(done)}/60 baseline runs"
@@ -110,6 +123,15 @@ def s9():
     have = {frac_tag(p): (_count(SYNTH / frac_tag(p) / "g3", "*.png"), _count(SYNTH / frac_tag(p) / "g4", "*.png")) for p in FRACTIONS}
     ok = [t for t, (a, b) in have.items() if a and b]
     return ("DONE" if len(ok) == 4 else "PARTIAL" if ok else "TODO"), " ".join(f"{t}:{a}/{b}" for t, (a, b) in have.items())
+
+
+def s10a():
+    st, detail = _check("psi")
+    if st == "DONE":
+        return st, detail
+    have = " ".join(f"{frac_tag(p)}_psi1:{_count(SYNTH / f'{frac_tag(p)}_psi1' / 'g3', '*.png')}/"
+                    f"{_count(SYNTH / f'{frac_tag(p)}_psi1' / 'g4', '*.png')}" for p in (0.1, 1.0))
+    return st, f"{detail}; {have}"
 
 
 def s10():
@@ -126,6 +148,11 @@ def s11():
 
 def s12():
     p = RESULTS / "tables" / "memorization_summary.csv"
+    return ("DONE" if p.exists() else "TODO"), str(p.name)
+
+
+def s12b():
+    p = RESULTS / "tables" / "gan_test.csv"
     return ("DONE" if p.exists() else "TODO"), str(p.name)
 
 
@@ -155,11 +182,16 @@ STAGES = [
     Stage("S5", "uint8 cache arrays", s5, f'"{PY}" -m src.data.cache'),
     Stage("S6", "stylegan3 zips (optional)", s6, f'"{PY}" -m src.data.make_sg3_zips'),
     Stage("S7", "upload private Kaggle dataset (optional)", s7, f'"{PY}" -m src.data.kaggle_dataset'),
+    Stage("S8a", "pre-registered check: RandAugment magnitude", s8a,
+          f'"{PY}" -m src.classify.queue --checks magnitude && "{PY}" -m src.analysis.checks magnitude --apply'),
     Stage("S8", "classifier runs, conditions 1-5 (60)", s8, f'"{PY}" -m src.classify.queue'),
     Stage("S9", "import synthetic images from Kaggle (manual fetch)", s9, f'"{PY}" -m src.gan.import_synth <downloads/synth_f*.zip>'),
+    Stage("S10a", "pre-registered check: psi 0.8 vs 1 images", s10a,
+          f'"{PY}" -m src.classify.queue --checks psi && "{PY}" -m src.analysis.checks psi --apply'),
     Stage("S10", "classifier runs, condition 6 (24)", s10, f'"{PY}" -m src.classify.queue --condition 6'),
-    Stage("S11", "aggregate + bootstrap + plots", s11, f'"{PY}" -m src.analysis.aggregate && "{PY}" -m src.analysis.bootstrap && "{PY}" -m src.analysis.plots'),
-    Stage("S12", "memorisation NN check", s12, f'"{PY}" -m src.analysis.memorization'),
+    Stage("S11", "aggregate + bootstrap + plots + fraction table", s11, f'"{PY}" -m src.analysis.aggregate && "{PY}" -m src.analysis.bootstrap && "{PY}" -m src.analysis.plots && "{PY}" -m src.analysis.fraction_table'),
+    Stage("S12", "memorisation check (both orientations)", s12, f'"{PY}" -m src.analysis.memorization'),
+    Stage("S12b", "GAN-test (real-trained classifier on synthetic sets)", s12b, f'"{PY}" -m src.analysis.gan_test'),
     Stage("S13", "RPS merge (after docker run)", s13, f'"{PY}" -m src.analysis.rps merge'),
     Stage("S14", "Grad-CAM figure", s14, f'"{PY}" -m src.analysis.gradcam'),
     Stage("S15", "export demo assets", s15,
@@ -186,14 +218,14 @@ def status():
 @cli.command()
 @click.argument("stage_id")
 def cmd(stage_id):
-    s = next(x for x in STAGES if x.id == stage_id.upper())
+    s = next(x for x in STAGES if x.id.upper() == stage_id.upper())
     click.echo(s.cmd or "(manual stage)")
 
 
 @cli.command()
 @click.argument("stage_id")
 def run(stage_id):
-    s = next(x for x in STAGES if x.id == stage_id.upper())
+    s = next(x for x in STAGES if x.id.upper() == stage_id.upper())
     if not s.cmd or "<" in s.cmd:
         raise SystemExit(f"{s.id} needs manual arguments: {s.cmd}")
     click.echo(s.cmd)

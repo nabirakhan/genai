@@ -77,15 +77,24 @@ EVAL_CELLS = [
     ("markdown", """# GAN evaluation + image generation (Kaggle T4 x2)
 
 Inputs: the **newest output of genai-gan-train** (its `final/<tag>_kimg<N>.pkl` hold every finished GAN) and the
-**genai-data-prep output** whose split equals the committed one (its val zip is the FID/KID reference).
-Per GAN at the session kimg budget: 500 images per rare grade (seeds 0-499, psi 0.8) with `Synthetic=true`
-metadata, overall FID/KID vs the val split (`calc_metrics.py`) and per-class FID/KID for grades 3/4
-(`src/gan/metrics_per_class.py`). Outputs: `synth_<tag>.zip`, `gan_metrics.csv`, `samples_<tag>.png`, `pkls/<tag>.pkl`.
+**genai-data-prep output** whose split equals the committed one (its val zip is the FID/KID reference, its f100 train
+zip the real-vs-real KID floor). Per GAN at the session kimg budget:
+- 500 images per rare grade (seeds 0-499, psi 0.8, truncation towards each grade's mean w) with `Synthetic=true`
+  metadata -> `synth_<tag>.zip`; for `PSI_CHECK_TAGS` also untruncated psi 1.0 sets, same seeds -> `synth_<tag>_psi1.zip`.
+- overall FID/KID vs the val split (`calc_metrics.py`: psi 1, labels drawn from val) and per-class KID for grades 3/4
+  with jackknife SEs (`src/gan/metrics_per_class.py`; rows `<tag>`, `<tag>_psi1` and the floor `real-f100-train`).
+  No per-class FID: the val split has only 25 / 39 images of grade 3 / 4.
+
+Outputs: `synth_<tag>[_psi1].zip`, `gan_metrics.csv`, `samples_<tag>[_psi1].png`, `pkls/<tag>.pkl`.
 Lab PC: `kaggle kernels output <user>/<this-notebook> -p downloads/`, then `python -m src.gan.import_synth downloads/synth_f*.zip`."""),
     ("code", f'''REPO = "{REPO_URL}"
 N_PER_CLASS, PSI, CLASSES = 500, 0.8, "3,4"
 TRUNC_CENTER = "class"    # conditional truncation towards each grade's mean w (study setting); "global" = stylegan3 w_avg, mostly grade 0
+PSI_CHECK_TAGS = ["f010-ada", "f100-ada"]   # also psi 1.0 (untruncated) sets, same seeds: synth_<tag>_psi1.zip, KID rows "<tag>_psi1"
 ONLY_TAGS = None          # e.g. ["f100-ada"]; None = every GAN that reached the session kimg budget
+PSI1_ONLY = False         # True: only the psi 1.0 sets of ONLY_TAGS (no psi 0.8 sets, no calc_metrics)
+# If S10a adopts psi 1: ONLY_TAGS = ["f025-ada", "f050-ada"]; PSI_CHECK_TAGS = ONLY_TAGS; PSI1_ONLY = True.
+# Then import only those _psi1 zips on the lab PC and keep the first run's gan_metrics.csv.
 GPUS = 2'''),
     ("code", SETUP),
     ("code", '''from pathlib import Path
@@ -93,6 +102,9 @@ from src.gan.kaggle_train import scan, find_zip, committed_split
 KIMG = int(json.load(open("notebooks/kaggle_session.json"))["kimg"])     # same budget for every GAN
 val, why = find_zip("val", [Path("/kaggle/input")], committed_split())  # check before copying ~1.5 GB of pickles
 assert val is not None, why
+train_zip, why_train = find_zip("f100", [Path("/kaggle/input")], committed_split())
+FLOOR = ["--real-train", str(train_zip)] if train_zip is not None else []   # real-vs-real KID floor: val vs f100 train
+print("REAL_TRAIN =", train_zip, f"({why_train})" if train_zip is not None else f"-> no real-vs-real floor: {why_train}")
 best, _ = scan([Path("/kaggle/input")])
 os.makedirs(f"{WORK}/pkls", exist_ok=True)
 PKLS = {}
@@ -107,10 +119,17 @@ for tag, (total, src) in sorted(best.items()):
 assert PKLS, f"no GAN at {KIMG} kimg found; attach the newest genai-gan-train output"
 REAL_VAL = str(val); print("REAL_VAL =", REAL_VAL, f"({why})")'''),
     ("code", '''import pandas as pd
-overall = []
+overall, SETS = [], []
 for tag, pkl in PKLS.items():
-    out = f"{WORK}/synth_{tag}"
-    sh([sys.executable, "-m", "src.gan.generate", "--pkl", pkl, "--outdir", out, "--classes", CLASSES, "--n", str(N_PER_CLASS), "--psi", str(PSI), "--tag", tag, "--trunc-center", TRUNC_CENTER])
+    variants = [(tag, PSI, TRUNC_CENTER)] + ([(f"{tag}_psi1", 1.0, "global")] if tag in PSI_CHECK_TAGS else [])
+    variants = [v for v in variants if v[0].endswith("_psi1")] if PSI1_ONLY else variants
+    for name, psi, center in variants:             # psi 1.0 = no truncation, so the centre plays no role
+        out = f"{WORK}/synth_{name}"
+        sh([sys.executable, "-m", "src.gan.generate", "--pkl", pkl, "--outdir", out, "--classes", CLASSES, "--n", str(N_PER_CLASS), "--psi", str(psi), "--tag", tag, "--trunc-center", center])
+        sh([sys.executable, "-m", "src.gan.metrics_per_class", "--gan", name, "--synth-dir", out, "--real", REAL_VAL, *FLOOR, "--classes", CLASSES, "--out", f"{WORK}/gan_metrics.csv"])
+        shutil.make_archive(out, "zip", out); SETS.append(name)
+    if PSI1_ONLY:
+        continue
     r = subprocess.run([sys.executable, "third_party/stylegan3/calc_metrics.py", "--metrics=fid50k_full,kid50k_full", f"--network={pkl}", f"--data={REAL_VAL}", f"--gpus={GPUS}"], capture_output=True, text=True)
     print(r.stdout[-1500:], r.stderr[-800:])
     res = {}
@@ -120,8 +139,6 @@ for tag, pkl in PKLS.items():
     if r.returncode or len(res) < 2:
         print(f"WARNING calc_metrics for {tag}: exit {r.returncode}, got {sorted(res)}")
     overall.append(dict(gan=tag, grade="all", n_real=None, n_gen=50000, fid=res.get("fid50k_full"), kid=res.get("kid50k_full"), kid_std=None))
-    sh([sys.executable, "-m", "src.gan.metrics_per_class", "--gan", tag, "--synth-dir", out, "--real", REAL_VAL, "--classes", CLASSES, "--out", f"{WORK}/gan_metrics.csv"])
-    shutil.make_archive(out, "zip", out)
 df = pd.read_csv(f"{WORK}/gan_metrics.csv", dtype={"grade": str})
 df = pd.concat([df[df.grade != "all"], pd.DataFrame(overall)], ignore_index=True)
 df.to_csv(f"{WORK}/gan_metrics.csv", index=False); print(df.to_string(index=False))'''),
@@ -129,13 +146,13 @@ df.to_csv(f"{WORK}/gan_metrics.csv", index=False); print(df.to_string(index=Fals
 from PIL import Image
 sys.path.insert(0, CODE)
 from src.gan.watermark import add_visible_label
-for tag in PKLS:
+for name in SETS:
     rows = []
     for g in CLASSES.split(","):
-        files = sorted(glob.glob(f"{WORK}/synth_{tag}/g{g}/*.png"))[:8]
+        files = sorted(glob.glob(f"{WORK}/synth_{name}/g{g}/*.png"))[:8]
         rows.append(np.concatenate([np.asarray(add_visible_label(Image.open(f).convert("RGB"))) for f in files], axis=1))
-    grid = Image.fromarray(np.concatenate(rows, axis=0)); grid.save(f"{WORK}/samples_{tag}.png"); display(grid.resize((grid.width // 2, grid.height // 2)))
-for tag in PKLS: shutil.rmtree(f"{WORK}/synth_{tag}", ignore_errors=True)   # zips remain
+    grid = Image.fromarray(np.concatenate(rows, axis=0)); grid.save(f"{WORK}/samples_{name}.png"); print(name); display(grid.resize((grid.width // 2, grid.height // 2)))
+for name in SETS: shutil.rmtree(f"{WORK}/synth_{name}", ignore_errors=True)   # zips remain
 os.chdir(WORK)
 shutil.rmtree(CODE, ignore_errors=True)
 print(sorted(os.listdir(WORK)))'''),

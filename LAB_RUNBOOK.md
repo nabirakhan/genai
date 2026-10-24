@@ -24,7 +24,7 @@ python -m src.pipeline status
 nvidia-smi
 ```
 
-Expected: a table of S0–S15 with DONE / PARTIAL / TODO. Continue at the first non-DONE stage.
+Expected: a table of S0–S15 (plus S8a, S10a) with DONE / PARTIAL / TODO. Continue at the first non-DONE stage.
 `python -m src.pipeline cmd S4` prints a stage's exact command; `python -m src.pipeline run S4` runs it.
 Claude Code: every shell call is a new process, so `activate` and `$env:` lines do not carry over; run `.venv\Scripts\python.exe ...` (or activate in the same call) and set `HF_TOKEN` in the call that uses it.
 
@@ -89,7 +89,20 @@ borderline pair and silently move test images into the GAN's training set.
 Not needed: the Kaggle `genai-data-prep` notebook builds the zips and the GAN notebooks read its
 output. Run `python -m src.data.make_sg3_zips` only for lab-PC GAN training (see the optional section below).
 
-## S8 Classifier runs, conditions 1–5 (60 runs, ~4 h total, resumable)
+## S8a Pre-registered magnitude check (12 runs, ~1 h, before the rest of S8)
+
+`report/prereg_checks.md` fixes the rule (RandAugment magnitude 9 vs 15, decided on validation data only). Do not change it.
+
+```powershell
+python -m src.classify.queue --checks magnitude --dry-run   # 6 baseline runs (c5 at 10%/100%, seeds 0-2) + 6 at magnitude 15
+python -m src.classify.queue --checks magnitude             # resumable like S8; Ctrl+C stops after the current run
+python -m src.analysis.checks magnitude --apply             # table + decision -> results\checks\decision_magnitude.json
+git add results src\classify\config.json; git commit -m "Pre-registered magnitude check decided"; git push
+```
+
+Expected: the 6 baseline runs are ordinary S8 runs (2 rows each in `results/classifier_runs.csv`); the 6 `*_m15_val` runs write one `dataset=val` row each to `results/checks/classifier_runs.csv` and are never scored on APTOS test or IDRiD. The queue prints no test/IDRiD metrics: until the decision is committed, do not open `results/classifier_runs.csv` or `results/preds/` and do not run `src.analysis.aggregate`. `checks` changes nothing while any of the 12 runs is missing (it lists them; rerun the queue). If 15 wins, `--apply` sets `ra_magnitude` 15 in `src/classify/config.json` and moves the 6 baseline runs to `results/checks/superseded_runs.csv` (+ `preds_superseded/`), so S8 re-runs them at 15 under the same ids; if 9 stays, only the decision is recorded. Then run S8 in full.
+
+## S8 Classifier runs, conditions 1–5 (60 runs, ~4 h total, resumable, after S8a)
 
 ```powershell
 python -m src.classify.queue --dry-run      # lists pending runs (84 total; condition 6 waits for synthetic images)
@@ -108,7 +121,23 @@ python -m src.gan.import_synth downloads\synth_f010-ada.zip downloads\synth_f025
 Copy-Item downloads\gan_metrics.csv results\gan_metrics.csv
 ```
 
-Expected: `synth/f{ppp}/g3` and `g4` each with 500 PNGs carrying `Synthetic=true`.
+Expected: `synth\f{ppp}\g3` and `g4` each with 500 PNGs (ψ 0.8, conditional truncation: the condition-6 training images). Every PNG is checked before anything is written (256×256 RGB, `Synthetic=true`, grade = its folder, generator = `f<ppp>-ada`, seed = file name, `trunc_center` = class, ψ ≠ 1); `synth_f010-noaug.zip` is skipped; `_psi1` zips are imported in S10a. "holds images of another generation run" means `synth\<set>` already holds other images: stop and write a Field note.
+
+`results\gan_metrics.csv`, per-class rows (grades 3, 4): `kid` = all val vs all 500 generated images of the grade, `kid_std` its standard error (`kid_se_real`: jackknife over the 25 / 39 val images; `kid_se_gen`: half-samples of the generated images, never with replacement). `<tag>_psi1` rows are the ψ-1 sets; `real-f100-train` is the real-vs-real floor (real val vs real train images of the grade: what "as good as real" looks like at this sample size). Per-class FID is empty on purpose (25 / 39 images cannot estimate a 2048-d covariance); grade `all` rows are calc_metrics' overall FID/KID.
+
+## S10a Pre-registered ψ check (12 runs, ~1 h, after S9, before S10)
+
+Same rule (`report/prereg_checks.md`): condition-6 images at ψ 0.8 (`synth\f<ppp>`) vs ψ 1 (`synth\f<ppp>_psi1`). Needs `synth_f010-ada_psi1.zip` and `synth_f100-ada_psi1.zip` from the Kaggle eval notebook output.
+
+```powershell
+python -m src.gan.import_synth downloads\synth_f010-ada_psi1.zip downloads\synth_f100-ada_psi1.zip   # -> synth\f010_psi1, synth\f100_psi1
+python -m src.classify.queue --checks psi --dry-run     # 6 baseline runs (c6 1x at 10%/100%, seeds 0-2) + 6 on psi-1 images
+python -m src.classify.queue --checks psi
+python -m src.analysis.checks psi --apply
+git add results src\classify\config.json; git commit -m "Pre-registered psi check decided"; git push
+```
+
+As in S8a: no condition-6 test/IDRiD numbers are looked at before the decision is committed. If ψ 1 wins, `--apply` sets `synth_variant` "psi1" and supersedes the 6 baseline runs; S10 then trains every condition-6 run on `synth\f<ppp>_psi1`, so it also needs `synth_f025-ada_psi1.zip` and `synth_f050-ada_psi1.zip`: re-run the Kaggle eval notebook with `ONLY_TAGS = ["f025-ada", "f050-ada"]; PSI_CHECK_TAGS = ONLY_TAGS; PSI1_ONLY = True` and import only those two zips (the queue lists those runs as waiting until then). Then S10.
 
 ## S10 Classifier runs, condition 6 (24 runs, ~1.5 h)
 
@@ -120,12 +149,23 @@ Expected: `synth/f{ppp}/g3` and `g4` each with 500 PNGs carrying `Synthetic=true
 python -m src.analysis.aggregate     # results/tables/*.csv|.md + web/public/results/tables.json
 python -m src.analysis.bootstrap     # 95% CIs per run and paired deltas (cond 6 - cond 5)
 python -m src.analysis.plots         # results/figures/*.png (+ copies in web/public/results)
+python -m src.analysis.fraction_table   # results/tables/fraction_label_shares.csv|.md
 git add results web/public/results; git commit -m "Results: tables, CIs, figures"; git push   # Windows PowerShell 5.1 has no &&
 ```
 
+`fraction_table` needs only the split and `raw\aptos\train.csv` (any time after S4): train images per grade per fraction and each grade's share of the GAN's conditioning labels (f010: grades 3 / 4 = 12 / 19 of 2,168 images, 0.55% / 0.88% of the labels G saw). Report it next to the GAN metrics.
+
 ## S12 Memorisation check (~10 min on GPU)
 
-`python -m src.analysis.memorization` → `results/tables/memorization_summary.csv`, `memorization_{tag}.csv`, figures. Downloads the Inception detector once (internet).
+`python -m src.analysis.memorization` (every `synth\f<ppp>` and `synth\f<ppp>_psi1` set; `--sets f010,f100_psi1` for some; an unknown name is an error) → `results\tables\memorization_summary.csv` (aggregate counts per set and grade; commit it), per-image `memorization_<set>.csv` and `results\figures\memorization_<set>.png` (gitignored: nearest-neighbour ids, real APTOS eyes). Needs `cache\aptos256.npy` (S5) and `aptos256\` (S3); downloads the Inception detector once (internet) and caches train+val features in `<GENAI_DATA>\cache\inception_trainval.npy`. If the download fails on a long `tmp_...` path, set `$env:DNNLIB_CACHE_DIR = "C:\dnnlib"` in the same call. Every image is scored in both orientations (the GANs train with x-flips).
+
+Expected and how to read it:
+- `n_vessel_copies` 0 everywhere. This is the copy test: a shift-tolerant vessel correlation ≥ 0.90 (either orientation) means a training photograph was reproduced. Also check `n_vessel_above_ref` (closer to a training eye than any held-out real eye gets). Any hit: open the figure (it shows every vessel match) and write a Field note.
+- `n_below_p1` / `n_below_p5` near 1% / 5% of `n_synth` would match new real eyes. More means "more typical than new real eyes", which truncation and grade-3/4-only sets cause without copying: compare with the same GAN's `_psi1` set before calling it memorisation.
+
+## S12b GAN-test (~2 min on GPU; after S10a's decision is committed)
+
+`python -m src.analysis.gan_test` → `results\tables\gan_test.csv` + `results\figures\gan_test.png` (aggregates only; commit both). Needs `checkpoints\c5_f100_r0_s0\best.pt` from the finished S8 run (refused if superseded or older than its results row) and the imported sets. The real-only classifier labels every synthetic set; per set and grade compare `share_as_grade` with `real_val_recall` (the same model on the real val images of that grade): far above it → over-typical or memorised images (see S12); mass on grades 0–2 (`pred_0`..`pred_2`) → the GAN leaks towards the common grades (see `fraction_label_shares.md`); `pred_3` vs `pred_4` shows whether it mixes the two rare grades. It reads val images, so run it only after the ψ decision is committed.
 
 ## S13 Retinal Pigmentation Score
 

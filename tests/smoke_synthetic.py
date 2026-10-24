@@ -54,8 +54,10 @@ def main() -> None:
     data, splits, results, ckpt = tmp / "data", tmp / "splits", tmp / "results", tmp / "ckpt"
     for d in (data / "raw" / "aptos" / "train_images", splits, results, ckpt):
         d.mkdir(parents=True, exist_ok=True)
+    shutil.copy(ROOT / "src" / "classify" / "config.json", tmp / "config.json")
     env = {**os.environ, "GENAI_DATA": str(data), "GENAI_SPLITS": str(splits), "GENAI_RESULTS": str(results),
-           "GENAI_CHECKPOINTS": str(ckpt), "PYTHONIOENCODING": "utf-8", "OPENBLAS_NUM_THREADS": "2"}
+           "GENAI_CHECKPOINTS": str(ckpt), "GENAI_CLASSIFY_CONFIG": str(tmp / "config.json"), "PYTHONIOENCODING": "utf-8",
+           "OPENBLAS_NUM_THREADS": "2"}
     py = sys.executable
     rng = np.random.default_rng(0)
 
@@ -113,16 +115,39 @@ def main() -> None:
 
     common = ["--epochs", "1", "--batch-size", "8", "--workers", "0", "--no-pretrained", "--allow-cpu", "--results-csv", str(results / "classifier_runs.csv")]
     run([py, "-m", "src.classify.train", "--condition", "3", "--fraction", "1.0", "--seed", "0", *common], env)
-    run([py, "-m", "src.classify.train", "--condition", "5", "--fraction", "1.0", "--seed", "0", *common], env)
+    # magnitude check at 100% seed 0: baseline c5_f100_r0_s0 (main CSV) + c5_f100_r0_s0_m15_val (checks CSV, val only)
+    qcommon = ["--epochs", "1", "--batch-size", "8", "--workers", "0", "--results-csv", str(results / "classifier_runs.csv"),
+               "--extra", "--no-pretrained --allow-cpu"]
+    p = run([py, "-m", "src.classify.queue", "--checks", "magnitude", "--fraction", "1.0", "--seed", "0", *qcommon], env)
+    assert "2 selected, 0 done, 2 pending" in p.stdout and "aptos_test:" not in p.stdout and "\nval: macro_f1=" in p.stdout, p.stdout
+    chk = pd.read_csv(results / "checks" / "classifier_runs.csv")
+    assert list(chk.run_id) == ["c5_f100_r0_s0_m15_val"] and list(chk.dataset) == ["val"], chk
+    assert {k: json.loads(chk.config[0])[k] for k in ("ra_magnitude", "synth_variant", "eval_split")} == {"ra_magnitude": 15, "synth_variant": None, "eval_split": "val"}
+    vp = results / "checks" / "preds" / "c5_f100_r0_s0_m15_val_val.csv"
+    assert vp.exists() and "y_true" not in pd.read_csv(vp, nrows=1).columns and not (ckpt / "c5_f100_r0_s0_m15_val").exists()
     run([py, "-m", "src.classify.train", "--condition", "6", "--fraction", "1.0", "--ratio", "1", "--seed", "0", *common, "--keep-weights"], env)
     p = run([py, "-m", "src.classify.train", "--condition", "5", "--fraction", "1.0", "--seed", "0", *common], env)
     assert "skipping" in p.stdout
+    p = run([py, "-m", "src.classify.train", "--condition", "5", "--fraction", "1.0", "--seed", "0", "--ra-magnitude", "15", *common], env, check=False)
+    assert p.returncode != 0 and "never goes into the main" in p.stderr, p.stderr
     res = pd.read_csv(results / "classifier_runs.csv")
     assert len(res) == 6 and set(res.dataset) == {"aptos_test", "idrid"}, res
+    vcols = ["val_macro_f1", "val_qwk", "val_recall_3", "val_recall_4"]
+    assert pd.concat([res, chk])[vcols].notna().all().all() and (res.val_qwk == res.best_val_qwk).all(), res[vcols]
     assert (res[res.condition == 6].n_synth > 0).all()
     assert len(list((results / "preds").glob("*.csv"))) == 6
     assert all("y_true" not in pd.read_csv(f, nrows=1).columns for f in (results / "preds").glob("*.csv"))
     assert (ckpt / "c6_f100_r1_s0" / "best.pt").exists() and (ckpt / "c5_f100_r0_s0" / "best.pt").exists() and not (ckpt / "c3_f100_r0_s0").exists()
+    p = run([py, "-m", "src.analysis.checks", "magnitude", "--results-csv", str(results / "classifier_runs.csv")], env, check=False)
+    assert p.returncode != 0 and "missing or ambiguous" in p.stderr and not (results / "checks" / "decision_magnitude.json").exists(), p.stderr
+    psi_dry = [py, "-m", "src.classify.queue", "--checks", "psi", "--dry-run", "--results-csv", str(results / "classifier_runs.csv")]
+    p = run(psi_dry, env, check=False)
+    assert p.returncode != 0 and "run S8a first" in p.stderr, p.stderr
+    stub = results / "checks" / "decision_magnitude.json"
+    stub.write_text(json.dumps({"applied": True, "variant_adopted": False}), encoding="utf-8")
+    p = run(psi_dry, env)
+    assert "12 selected, 1 done, 11 pending" in p.stdout and "f100_psi1" in p.stdout and "  c6_f100_r1_s1\n" in p.stdout, p.stdout
+    stub.unlink()
 
     run([py, "-m", "src.analysis.aggregate", "--runs-csv", str(results / "classifier_runs.csv"), "--out-dir", str(results / "tables"),
          "--web-dir", str(tmp / "web")], env)
@@ -134,7 +159,9 @@ def main() -> None:
     assert list((results / "figures").glob("learning_curve_*.png"))
     p = run([py, "-m", "src.classify.queue", "--dry-run", "--results-csv", str(results / "classifier_runs.csv")], env)
     assert "84 selected" in p.stdout and "3 done" in p.stdout, p.stdout
-    run([py, "-m", "src.pipeline", "status"], env)
+    p = run([py, "-m", "src.pipeline", "status"], env)
+    assert " S8a PARTIAL " in p.stdout and "2/12 check runs" in p.stdout and "\nS10a PARTIAL " in p.stdout and " ERR " not in p.stdout, p.stdout
+    assert (tmp / "config.json").read_text() == (ROOT / "src" / "classify" / "config.json").read_text()
     print(f"\nSMOKE_OK  ({tmp})")
     shutil.rmtree(tmp, ignore_errors=True)
 

@@ -2,11 +2,16 @@
 
   python -m src.classify.train --condition 5 --fraction 1.0 --seed 0
   python -m src.classify.train --condition 6 --fraction 0.1 --ratio 2 --seed 1
+  python -m src.classify.train --condition 5 --fraction 0.1 --seed 0 --ra-magnitude 15 --eval-split val
 
 Resumable: checkpoints/{run_id}/last.pt is written every epoch and picked up automatically.
-Idempotent: if results/classifier_runs.csv already has this run_id, exits unless --force.
+Idempotent: if the results CSV already has this run_id, exits unless --force.
 Appends one row per eval dataset to results/classifier_runs.csv and writes per-image
-predictions to results/preds/{run_id}_{dataset}.csv (used for bootstrap CIs).
+predictions to results/preds/{run_id}_{dataset}.csv (used for bootstrap CIs). Every row also carries the
+val metrics of the selected epoch (val_*), which the pre-registered checks (src/analysis/checks.py) read.
+--ra-magnitude / --synth-variant default to src/classify/config.json; a value that differs from it adds a
+run_id suffix (_m15, _psi1). --eval-split val (suffix _val) scores the selected model on val only, never on
+APTOS test / IDRiD. Such runs go to results/checks/classifier_runs.csv (+ checks/preds/), never to the main CSV.
 """
 import json
 import math
@@ -25,19 +30,30 @@ import torch
 import torch.nn.functional as F
 from filelock import FileLock
 
-from src.classify.data import CONDITIONS, NUM_CLASSES, make_loaders
+from src.classify.data import CONDITIONS, NUM_CLASSES, load_config, make_loaders
 from src.classify.metrics import METRIC_COLS, compute_metrics
 from src.classify.model import DEFAULT_MODEL, create_model
 from src.genai.paths import CHECKPOINTS, FRACTIONS, RESULTS, frac_tag
 
 RESULTS_CSV = RESULTS / "classifier_runs.csv"
+CHECKS_CSV = RESULTS / "checks" / "classifier_runs.csv"
+VAL_COLS = ["val_macro_f1", "val_qwk", "val_recall_3", "val_recall_4"]
 ROW_COLS = ["run_id", "condition", "condition_name", "fraction", "ratio", "seed", "dataset", *METRIC_COLS,
-            "n_train", "n_synth", "best_epoch", "epochs_run", "best_val_qwk", "train_time_s", "model", "config", "git_sha", "timestamp"]
+            "n_train", "n_synth", "best_epoch", "epochs_run", "best_val_qwk", *VAL_COLS, "train_time_s", "model", "config",
+            "git_sha", "timestamp"]
 KEEP_WEIGHTS = {"c5_f100_r0_s0", "c6_f100_r1_s0"}  # best.pt needed by gradcam (S14) and api.export_assets (S15)
 
 
-def run_id_of(condition: int, fraction: float, ratio: float, seed: int) -> str:
-    return f"c{condition}_{frac_tag(fraction)}_r{ratio:g}_s{seed}"
+def run_id_of(condition: int, fraction: float, ratio: float, seed: int, ra_magnitude: int | None = None,
+              synth_variant: str | None = None, eval_split: str = "test") -> str:
+    """Settings that differ from config.json add a suffix (None: unused or as configured); val-only scoring adds _val."""
+    rid = f"c{condition}_{frac_tag(fraction)}_r{ratio:g}_s{seed}"
+    cfg = load_config() if ra_magnitude is not None or synth_variant is not None else {}
+    if ra_magnitude is not None and ra_magnitude != cfg["ra_magnitude"]:
+        rid += f"_m{ra_magnitude}"
+    if synth_variant is not None and synth_variant != cfg["synth_variant"]:
+        rid += f"_{synth_variant or 'psi08'}"
+    return rid + ("_val" if eval_split == "val" else "")
 
 
 def seed_all(seed: int) -> None:
@@ -100,10 +116,8 @@ def predict(model, loader, device, use_amp: bool):
 
 
 def already_done(results_csv: Path, run_id: str) -> bool:
-    if not results_csv.exists():
-        return False
-    df = pd.read_csv(results_csv, usecols=["run_id", "dataset"])
-    return ((df.run_id == run_id) & (df.dataset == "aptos_test")).any()
+    """A run's rows are appended in one atomic write at its end, so any row means it finished."""
+    return results_csv.exists() and run_id in set(pd.read_csv(results_csv, usecols=["run_id"]).run_id)
 
 
 def append_rows(results_csv: Path, rows: list[dict]) -> None:
@@ -138,17 +152,31 @@ def append_rows(results_csv: Path, rows: list[dict]) -> None:
 @click.option("--force", is_flag=True, help="re-run even if results exist")
 @click.option("--allow-missing-idrid", is_flag=True, help="run without the IDRiD external test (the run then never gets an idrid row)")
 @click.option("--allow-cpu", is_flag=True, help="allow training without CUDA (smoke tests only)")
-@click.option("--results-csv", type=click.Path(path_type=Path), default=RESULTS_CSV)
+@click.option("--ra-magnitude", type=click.IntRange(0, 30), default=None, help="RandAugment magnitude of 31 bins (conditions 5-6); default config.json")
+@click.option("--synth-variant", default=None, help='condition 6 images: "" = synth/f<ppp>, "psi1" = synth/f<ppp>_psi1; default config.json')
+@click.option("--eval-split", type=click.Choice(["test", "val"]), default="test", help="val: score the selected model on val only (checks)")
+@click.option("--hide-test", is_flag=True, help="do not print APTOS test / IDRiD metrics (check runs are decided on val first)")
+@click.option("--results-csv", type=click.Path(path_type=Path), default=None,
+              help="default results/classifier_runs.csv; variant and val runs results/checks/classifier_runs.csv")
 def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weight_decay, patience, mixup_alpha,
-         model_name, no_pretrained, keep_weights, force, allow_missing_idrid, allow_cpu, results_csv):
+         model_name, no_pretrained, keep_weights, force, allow_missing_idrid, allow_cpu, ra_magnitude, synth_variant,
+         eval_split, hide_test, results_csv):
     assert any(abs(fraction - f) < 1e-9 for f in FRACTIONS), f"fraction must be one of {FRACTIONS}"
     if ratio is None:
         ratio = 1.0 if condition == 6 else 0.0
     if condition != 6:
         ratio = 0.0
-    run_id = run_id_of(condition, fraction, ratio, seed)
+    conf = load_config()  # settings a condition does not use stay None, so neither its id nor its resume check depends on them
+    ra_magnitude = (conf["ra_magnitude"] if ra_magnitude is None else ra_magnitude) if condition >= 5 else None
+    synth_variant = (conf["synth_variant"] if synth_variant is None else synth_variant) if condition == 6 else None
+    run_id = run_id_of(condition, fraction, ratio, seed, ra_magnitude, synth_variant, eval_split)
+    main_run = run_id == run_id_of(condition, fraction, ratio, seed)
+    results_csv = results_csv or (RESULTS_CSV if main_run else CHECKS_CSV)
+    if not main_run and results_csv.resolve() == RESULTS_CSV.resolve():
+        raise click.ClickException(f"{run_id} is a variant or val run: it never goes into the main {RESULTS_CSV}")
     cfg = dict(epochs=epochs, batch_size=batch_size, lr=lr, weight_decay=weight_decay, patience=patience,
-               mixup_alpha=mixup_alpha, model=model_name, pretrained=not no_pretrained)
+               mixup_alpha=mixup_alpha, model=model_name, pretrained=not no_pretrained,
+               ra_magnitude=ra_magnitude, synth_variant=synth_variant, eval_split=eval_split)
     if already_done(results_csv, run_id) and not force:
         click.echo(f"{run_id}: already in {results_csv.name}, skipping (use --force to redo)")
         return
@@ -161,8 +189,9 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
     torch.backends.cudnn.benchmark = True
     t0 = time.time()
 
-    loaders, info = make_loaders(condition, fraction, ratio, batch_size, workers, seed)
-    if "idrid" not in loaders and not allow_missing_idrid:
+    loaders, info = make_loaders(condition, fraction, ratio, batch_size, workers, seed,
+                                 ra_magnitude=ra_magnitude, synth_variant=synth_variant)
+    if eval_split == "test" and "idrid" not in loaders and not allow_missing_idrid:
         raise click.ClickException("IDRiD cache/labels missing (S2, S3, S5): the run would be marked done without "
                                    "its external-test row and its weights deleted; pass --allow-missing-idrid to override")
     click.echo(f"{run_id}: device={device} train={info['n_train']} synth={info['n_synth']} counts={info['counts']}")
@@ -248,8 +277,10 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
 
     model.load_state_dict(best_state)
     train_time = time.time() - t0
+    sel = {c: best_val[c.removeprefix("val_")] for c in VAL_COLS}
+    click.echo(f"selected epoch {best_epoch}: " + " ".join(f"{k}={v:.4f}" for k, v in sel.items()))
     rows = []
-    for ds_name in ("aptos_test", "idrid"):
+    for ds_name in ("val",) if eval_split == "val" else ("aptos_test", "idrid"):
         if ds_name not in loaders:
             click.echo(f"WARNING: {ds_name} not available, skipping")
             continue
@@ -258,14 +289,15 @@ def main(condition, fraction, ratio, seed, epochs, batch_size, workers, lr, weig
         rows.append({"run_id": run_id, "condition": condition, "condition_name": CONDITIONS[condition],
                      "fraction": fraction, "ratio": ratio, "seed": seed, "dataset": ds_name, **m,
                      "n_train": info["n_train"], "n_synth": info["n_synth"], "best_epoch": best_epoch,
-                     "epochs_run": epoch + 1, "best_val_qwk": best_qwk, "train_time_s": round(train_time, 1),
+                     "epochs_run": epoch + 1, "best_val_qwk": best_qwk, **sel, "train_time_s": round(train_time, 1),
                      "model": model_name, "config": json.dumps(cfg, sort_keys=True), "git_sha": git_sha(), "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         preds = pd.DataFrame({"image_id": info["ids"][ds_name], "y_pred": y_pred})  # labels joined at analysis time
         for k in range(NUM_CLASSES):
             preds[f"p{k}"] = np.round(probs[:, k], 4)
         (results_csv.parent / "preds").mkdir(parents=True, exist_ok=True)
         preds.to_csv(results_csv.parent / "preds" / f"{run_id}_{ds_name}.csv", index=False)
-        click.echo(f"{ds_name}: " + " ".join(f"{k}={v:.4f}" for k, v in m.items()))
+        if ds_name == "val" or not hide_test:
+            click.echo(f"{ds_name}: " + " ".join(f"{k}={v:.4f}" for k, v in m.items()))
     append_rows(results_csv, rows)
 
     last_path.unlink(missing_ok=True)

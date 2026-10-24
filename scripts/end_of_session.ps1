@@ -7,7 +7,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
 
 Write-Host "== committing tracked outputs =="
-git add splits results web/public/results LAB_RUNBOOK.md 2>$null
+git add splits results web/public/results LAB_RUNBOOK.md src/classify/config.json 2>$null
 $staged = git diff --cached --name-only
 if ($staged) {
     $n = (Get-Content results/classifier_runs.csv -ErrorAction SilentlyContinue | Measure-Object -Line).Lines
