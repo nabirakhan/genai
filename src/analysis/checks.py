@@ -18,7 +18,6 @@ results/checks/preds_superseded/, so the main queue re-runs them with the adopte
 winning only records the decision.
 """
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,7 +27,7 @@ from filelock import FileLock
 
 from src.classify.data import config_path, load_config
 from src.classify.queue import CHECK_FRACTIONS, CHECKS, SEEDS, decision
-from src.classify.train import RESULTS_CSV, ROW_COLS, run_id_of
+from src.classify.train import RESULTS_CSV, ROW_COLS, replace_retry, run_id_of
 
 RULE = ("the variant is adopted only if, at BOTH fractions (10% and 100%), its mean val macro-F1 over the 3 seeds "
         "exceeds the baseline mean by more than the baseline's seed standard deviation (ddof=1), AND its mean val "
@@ -60,7 +59,7 @@ def atomic_write(path: Path, write) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     write(tmp)
-    os.replace(tmp, path)
+    replace_retry(tmp, path)
 
 
 def decide(name: str, results_csv: Path) -> tuple[list[dict], list[dict], bool]:
@@ -127,7 +126,7 @@ def supersede(name: str, results_csv: Path) -> None:
         for rid, ds in zip(df[stale].run_id, df[stale].dataset):
             p = results_csv.parent / "preds" / f"{rid}_{ds}.csv"
             if p.exists():
-                os.replace(p, checks_dir / "preds_superseded" / p.name)
+                replace_retry(p, checks_dir / "preds_superseded" / p.name)
         atomic_write(results_csv, lambda t: df[~stale].to_csv(t, index=False))
     click.echo(f"superseded {int(stale.sum())} rows of {sorted(set(df[stale].run_id))}: the main queue re-runs them")
 

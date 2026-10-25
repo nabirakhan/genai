@@ -20,10 +20,9 @@ import time
 from pathlib import Path
 
 import click
-import pandas as pd
 
 from src.classify.data import config_path, load_config, synth_files
-from src.classify.train import KEEP_WEIGHTS, RESULTS_CSV, run_id_of
+from src.classify.train import KEEP_WEIGHTS, RESULTS_CSV, run_id_of, run_ids
 from src.data.split import fraction_mask, load_splits
 from src.genai.paths import RARE_GRADES
 
@@ -87,7 +86,7 @@ def check_config(checks_dir: Path) -> None:
 
 
 def done_ids(results_csv) -> set[str]:
-    return set(pd.read_csv(results_csv, usecols=["run_id"]).run_id) if Path(results_csv).exists() else set()
+    return run_ids(results_csv)
 
 
 def synth_ready(fraction: float, ratio: float, variant: str | None = None) -> str | None:

@@ -83,6 +83,24 @@ def atomic_save(obj, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def replace_retry(src: Path, dst: Path, wait_s: float = 600) -> None:
+    """os.replace that waits while another program has either file open: Windows refuses to replace or move an
+    open file (a results CSV open in Excel, or read by another queue window at that moment)."""
+    t0 = time.time()
+    note = t0 + 2
+    while True:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if time.time() - t0 > wait_s:
+                raise
+            if time.time() > note:
+                click.echo(f"{Path(dst).name} is open in another program (Excel?): close it; retrying", err=True)
+                note = time.time() + 30
+            time.sleep(0.2)
+
+
 def git_sha() -> str:
     try:
         return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
@@ -115,9 +133,17 @@ def predict(model, loader, device, use_amp: bool):
     return np.concatenate(ys), np.concatenate(preds), np.concatenate(probs)
 
 
+def run_ids(results_csv) -> set[str]:
+    """run_ids with rows in results_csv, read under the append lock (parallel queue windows share the file)."""
+    if not Path(results_csv).exists():
+        return set()
+    with FileLock(str(results_csv) + ".lock"):
+        return set(pd.read_csv(results_csv, usecols=["run_id"]).run_id)
+
+
 def already_done(results_csv: Path, run_id: str) -> bool:
     """A run's rows are appended in one atomic write at its end, so any row means it finished."""
-    return results_csv.exists() and run_id in set(pd.read_csv(results_csv, usecols=["run_id"]).run_id)
+    return run_id in run_ids(results_csv)
 
 
 def append_rows(results_csv: Path, rows: list[dict]) -> None:
@@ -131,7 +157,7 @@ def append_rows(results_csv: Path, rows: list[dict]) -> None:
             new = pd.concat([old, new], ignore_index=True)
         tmp = results_csv.with_name(results_csv.name + ".tmp")
         new.to_csv(tmp, index=False)
-        os.replace(tmp, results_csv)
+        replace_retry(tmp, results_csv)
 
 
 @click.command()

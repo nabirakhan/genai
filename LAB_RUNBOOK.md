@@ -100,6 +100,8 @@ python -m src.analysis.checks magnitude --apply             # table + decision -
 git add results src\classify\config.json; git commit -m "Pre-registered magnitude check decided"; git push
 ```
 
+Parallel windows: split the 12 runs by `--seed` as in S8 and apply after all windows have finished.
+
 Expected: the 6 baseline runs are ordinary S8 runs (2 rows each in `results/classifier_runs.csv`); the 6 `*_m15_val` runs write one `dataset=val` row each to `results/checks/classifier_runs.csv` and are never scored on APTOS test or IDRiD. The queue prints no test/IDRiD metrics: until the decision is committed, do not open `results/classifier_runs.csv` or `results/preds/` and do not run `src.analysis.aggregate`. `checks` changes nothing while any of the 12 runs is missing (it lists them; rerun the queue). If 15 wins, `--apply` sets `ra_magnitude` 15 in `src/classify/config.json` and moves the 6 baseline runs to `results/checks/superseded_runs.csv` (+ `preds_superseded/`), so S8 re-runs them at 15 under the same ids; if 9 stays, only the decision is recorded. Then run S8 in full.
 
 ## S8 Classifier runs, conditions 1–5 (60 runs, ~4 h total, resumable, after S8a)
@@ -112,6 +114,14 @@ python -m src.classify.queue                # runs them; Ctrl+C stops after the 
 Expected: ~3–5 min per run on the RTX 4000 Ada; each run appends 2 rows (aptos_test, idrid) to `results/classifier_runs.csv` and a predictions file to `results/preds/`. Re-running the queue skips finished runs. If a run crashes (OOM, etc.) the queue continues; rerun the queue later. Watch the first run's epoch log: val QWK should climb above 0.8 within ~5 epochs at 100%.
 
 Checks after a few runs: `python -m src.analysis.aggregate` prints the macro-F1 table so far.
+
+**Faster: up to three queue windows at once.** One run rarely keeps the GPU busy (augmentation runs on the CPU workers). During the first run check `nvidia-smi`: if GPU-Util stays well below ~80%, run the queue in three PowerShell windows (venv active and `$env:GENAI_DATA` set in each), split by seed so that no run is in two windows:
+
+```powershell
+python -m src.classify.queue --seed 0 --workers 4    # window 1; windows 2 and 3: --seed 1, --seed 2
+```
+
+The same split works for `--checks magnitude` and `--checks psi` (4 runs per window); run `checks ... --apply` only after every window has finished. Never give two windows overlapping filters (a plain queue next to a `--seed 0` one would train the same runs twice). Per-run times in the CSV then include the sharing. An append that finds `results\classifier_runs.csv` open in another program (Excel) waits and says so until it is closed.
 
 ## S9 Import synthetic images (after the Kaggle eval notebook ran)
 
@@ -137,11 +147,13 @@ python -m src.analysis.checks psi --apply
 git add results src\classify\config.json; git commit -m "Pre-registered psi check decided"; git push
 ```
 
+Parallel windows: split the 12 runs by `--seed` as in S8 and apply after all windows have finished.
+
 As in S8a: no condition-6 test/IDRiD numbers are looked at before the decision is committed. If ψ 1 wins, `--apply` sets `synth_variant` "psi1" and supersedes the 6 baseline runs; S10 then trains every condition-6 run on `synth\f<ppp>_psi1`, so it also needs `synth_f025-ada_psi1.zip` and `synth_f050-ada_psi1.zip`: re-run the Kaggle eval notebook with `ONLY_TAGS = ["f025-ada", "f050-ada"]; PSI_CHECK_TAGS = ONLY_TAGS; PSI1_ONLY = True` and import only those two zips (the queue lists those runs as waiting until then). Then S10.
 
 ## S10 Classifier runs, condition 6 (24 runs, ~1.5 h)
 
-`python -m src.classify.queue` (it now finds the synthetic images). Keeps `best.pt` for `c5_f100_r0_s0` and `c6_f100_r1_s0` under `checkpoints/` (needed by S14/S15; do not delete).
+`python -m src.classify.queue` (it now finds the synthetic images; parallel windows as in S8). Keeps `best.pt` for `c5_f100_r0_s0` and `c6_f100_r1_s0` under `checkpoints/` (needed by S14/S15; do not delete).
 
 ## S11 Analysis (~5 min)
 
