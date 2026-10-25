@@ -116,7 +116,7 @@ Expected: ~3–5 min per run on the RTX 4000 Ada; each run appends 2 rows (aptos
 
 Checks after a few runs: `python -m src.analysis.aggregate` prints the macro-F1 table so far.
 
-**Faster: up to three queue windows at once.** One run rarely keeps the GPU busy (augmentation runs on the CPU workers). During the first run check `nvidia-smi`: if GPU-Util stays well below ~80%, run the queue in three PowerShell windows (venv active and `$env:GENAI_DATA` set in each), split by seed so that no run is in two windows:
+**Faster: up to three queue windows at once.** One run rarely keeps the GPU busy (augmentation runs on the CPU workers): measured on a Kaggle T4 (25 Oct, `genai-gpu-smoke`), a training step at batch 64 fp16 takes 164 ms, i.e. ~6 s of GPU per epoch, with 3.9 GB peak memory, so three runs fit in 20 GB. During the first run check `nvidia-smi`: if GPU-Util stays well below ~80%, run the queue in three PowerShell windows (venv active and `$env:GENAI_DATA` set in each), split by seed so that no run is in two windows:
 
 ```powershell
 python -m src.classify.queue --seed 0 --workers 4    # window 1; windows 2 and 3: --seed 1, --seed 2
