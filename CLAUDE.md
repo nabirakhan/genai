@@ -21,6 +21,11 @@ Severe DR (grades 3, 4) is rare in training data, so classifiers miss it. Test w
 - **Responsible AI:** Retinal Pigmentation Score on real vs generated; nearest-neighbour memorisation check; all synthetic images carry `Synthetic=true` PNG metadata and a visible SYNTHETIC label wherever displayed (never on classifier training copies: a visible mark would be a shortcut feature).
 - **Main question:** does (6) beat (5)? Negative result is valid.
 
+## Status and next steps (updated 2026-10-25)
+- **GANs** (Kaggle `genai-gan-train`, 1,000 kimg each): f100-ada, f010-ada and f010-noaug done; f025-ada ~400 kimg after version 6; f050-ada not started. The weekly GPU quota (30 h, resets Saturday 00:00 UTC) is spent until 31 Oct; then two sessions finish f025 and f050. Before them, set the train notebook's first cell back to `OVERRIDES = []` (version 6 used `["--hours", "7.9"]` to fit the last quota hours).
+- **Eval** (Kaggle `genai-gan-eval`): version 1 (25 Oct) holds `synth_f010-ada.zip`, `synth_f100-ada.zip`, their `_psi1` zips, `gan_metrics.csv` (overall FID f010 17.2, f100 18.3), sample grids and `pkls/`. Once f025/f050 finish, run it again with `ONLY_TAGS = ["f010-noaug", "f025-ada", "f050-ada"]`.
+- **Lab PC**: nothing run yet. Next session (Tue 27 Oct), in `LAB_RUNBOOK.md` order: S0–S5 (bring `kaggle.json` and the IDRiD zip), S8a, S8, then S9 with the f010/f100 zips, S10a, S10. The 6 condition-6 runs at 25%/50% wait for the second eval run. Run the queue in three windows split by `--seed` (runbook S8). Commit after S4, after each pre-registered decision, and at session end (`scripts\end_of_session.ps1`). Until a check's decision is committed, do not open `results/classifier_runs.csv` / `results/preds/` or run `src.analysis.aggregate` (`report/prereg_checks.md`, Data use).
+
 ## Where things run
 | Machine | Use for |
 |---|---|
@@ -36,8 +41,8 @@ Severe DR (grades 3, 4) is rare in training data, so classifiers miss it. Test w
 ## Setup (any machine, native Windows, no WSL needed)
 GAN training is on Kaggle, so nvcc is never needed locally; stylegan3 inference falls back to reference ops.
 ```powershell
-git clone --recurse-submodules https://github.com/nabirakhan/genai && cd genai
-uv venv .venv --python 3.11 && .venv\Scripts\activate
+git clone --recurse-submodules https://github.com/nabirakhan/genai; cd genai   # Windows PowerShell 5.1: no &&
+uv venv .venv --python 3.11; .venv\Scripts\activate
 uv pip install -r requirements-lab.txt            # CUDA 12.8 torch; CPU machines: --index-url https://download.pytorch.org/whl/cpu
 uv pip install -e ".[api,dev]"
 python scripts/apply_patches.py                   # shape-tolerant resume + ADA p restore, see third_party/PATCHES.md
@@ -51,22 +56,26 @@ python tests/smoke_synthetic.py                   # CPU end-to-end on fake image
 3. Results append to `results/classifier_runs.csv` (2 rows per run: aptos_test, idrid) and `results/preds/`. Small files only in git.
 4. ~10 min before leaving: let the current run finish, run `scripts\end_of_session.ps1` (commit + push + credential cleanup).
 
+## Git and publishing
+- Commit and push to `main` as **Nabira Khan** only. In the repo (not `--global` on the shared lab PC): `git config user.name "Nabira Khan"`, `git config user.email "nabirakhan.official@gmail.com"`. Never add `Co-Authored-By` or "Generated with Claude Code" lines to commit messages or PRs.
+- Keep this project's work local: no artifacts, cloud documents or other publishing (web search is fine).
+
 ## Repo layout
 ```
 src/genai/paths.py   all paths; GENAI_DATA / GENAI_SPLITS / GENAI_RESULTS / GENAI_CHECKPOINTS env overrides
 src/pipeline.py      stage tracker (status | cmd | run)
 src/data/            download, crop (fundus.py), dedup, split (+ fraction_mask), cache, sg3 zips, kaggle dataset
-src/classify/        data.py (6 conditions), model.py, metrics.py, train.py (resumable), queue.py (84 runs)
-src/gan/             generate, metrics_per_class (FID/KID), watermark, import_synth; __init__ adds stylegan3 to sys.path
-src/analysis/        aggregate, bootstrap, plots, memorization, rps, gradcam
+src/classify/        data.py (6 conditions), model.py, metrics.py, train.py (resumable), queue.py (84 runs + --checks), config.json (settings fixed by the pre-registered checks)
+src/gan/             kaggle_train (Kaggle session runner), train_local (optional lab-PC training), generate, metrics_per_class (FID/KID), watermark, import_synth; __init__ adds stylegan3 to sys.path
+src/analysis/        aggregate, bootstrap, plots, checks (pre-registered decisions), memorization, gan_test, fraction_table, rps, gradcam
 notebooks/           build_notebooks.py -> kaggle_gan_train.ipynb, kaggle_gan_eval.ipynb
 third_party/         stylegan3 submodule (pinned), patches/, PATCHES.md
 api/                 FastAPI service (core.py, main.py, export_assets.py, Dockerfile, space/)
 web/                 Vite + React + TS (api.ts, types.ts, pages/); public/results/ exported by analysis
 splits/ results/     tracked CSVs, tables, figures
 scripts/             apply_patches.py, check_resume_compat.py, end_of_session.ps1
-tests/               smoke_synthetic.py
-report/ demo/        outline, figure manifest, demo script
+tests/               smoke_synthetic.py (CPU end-to-end), test_checks, test_gan_eval, test_kaggle_train, test_csv_concurrency
+report/ demo/        outline, figure manifest, prereg_checks.md (pre-registered rules), demo script
 ```
 Never commit: datasets, generated images in bulk, `*.pkl` / `*.pt` / `*.npy`, `kaggle.json`, `.env`, `web/node_modules`.
 

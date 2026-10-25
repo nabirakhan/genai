@@ -35,6 +35,7 @@ winget install --id Git.Git -e --silent
 winget install --id astral-sh.uv -e --silent
 # reopen the terminal so PATH updates
 cd C:\genai
+git config user.name "Nabira Khan"; git config user.email "nabirakhan.official@gmail.com"   # repo-local, not --global (shared PC)
 uv venv .venv --python 3.11
 .venv\Scripts\activate
 uv pip install -r requirements-lab.txt          # torch + torchvision, CUDA 12.8 wheels
@@ -123,13 +124,19 @@ python -m src.classify.queue --seed 0 --workers 4    # window 1; windows 2 and 3
 
 The same split works for `--checks magnitude` and `--checks psi` (4 runs per window); run `checks ... --apply` only after every window has finished. Never give two windows overlapping filters (a plain queue next to a `--seed 0` one would train the same runs twice). Per-run times in the CSV then include the sharing. An append that finds `results\classifier_runs.csv` open in another program (Excel) waits and says so until it is closed.
 
-## S9 Import synthetic images (after the Kaggle eval notebook ran)
+## S9 Import synthetic images (after a Kaggle eval run)
+
+The Kaggle notebook `genai-gan-eval` runs twice. Version 1 (25 Oct) holds `synth_f010-ada.zip` and `synth_f100-ada.zip` (plus their `_psi1` zips for S10a); a later version (after the f025/f050 GANs finish, ~1 Nov) holds `synth_f025-ada.zip`, `synth_f050-ada.zip` and the f010-noaug metrics. Import what exists; S9 stays PARTIAL until all four sets are in, and the queue lists the missing condition-6 runs as waiting.
 
 ```powershell
-mkdir downloads; kaggle kernels output <user>/<eval-notebook-slug> -p downloads
-python -m src.gan.import_synth downloads\synth_f010-ada.zip downloads\synth_f025-ada.zip downloads\synth_f050-ada.zip downloads\synth_f100-ada.zip
-Copy-Item downloads\gan_metrics.csv results\gan_metrics.csv
+Remove-Item downloads -Recurse -Force -ErrorAction SilentlyContinue; mkdir downloads
+kaggle kernels output k230914nabirakhan/genai-gan-eval -p downloads      # newest version's output, ~1 GB with pkls\
+python -m src.gan.import_synth downloads\synth_f010-ada.zip downloads\synth_f100-ada.zip   # second run: downloads\synth_f025-ada.zip downloads\synth_f050-ada.zip
+python -c "import pandas as pd, pathlib as p; f = p.Path('results/gan_metrics.csv'); new = pd.read_csv('downloads/gan_metrics.csv', dtype={'grade': str}); old = pd.read_csv(f, dtype={'grade': str}) if f.exists() else new.iloc[:0]; pd.concat([old, new]).drop_duplicates(['gan', 'grade'], keep='last').to_csv(f, index=False)"
+Copy-Item downloads\pkls\*.pkl C:\genai-data\gan_pkls\      # final GAN pickles, f100-ada.pkl is used by S15
 ```
+
+The `python -c` line merges this run's metrics into `results\gan_metrics.csv` (rows of earlier runs are kept).
 
 Expected: `synth\f{ppp}\g3` and `g4` each with 500 PNGs (ψ 0.8, conditional truncation: the condition-6 training images). Every PNG is checked before anything is written (256×256 RGB, `Synthetic=true`, grade = its folder, generator = `f<ppp>-ada`, seed = file name, `trunc_center` = class, ψ ≠ 1); `synth_f010-noaug.zip` is skipped; `_psi1` zips are imported in S10a. "holds images of another generation run" means `synth\<set>` already holds other images: stop and write a Field note.
 
@@ -196,7 +203,7 @@ If the container layout differs from the README, adjust `RPS_CMD` in `src/analys
 ## S15 Demo assets (~10 min)
 
 ```powershell
-# the final f100-ada pickle comes from the Kaggle train notebook output (download it to C:\genai-data\gan_pkls\)
+# C:\genai-data\gan_pkls\f100-ada.pkl was copied there in S9 (from the genai-gan-eval output)
 $env:HF_TOKEN = "<token from huggingface.co/settings/tokens>"
 python -m api.export_assets --pkl C:\genai-data\gan_pkls\f100-ada.pkl --upload <hf-user>/dr-gan-demo
 uvicorn api.main:app --port 8000     # then open http://localhost:8000/docs and try /health, /generate
