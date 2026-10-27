@@ -252,3 +252,9 @@ far too slow to be useful.
 ## Field notes
 
 (append dated notes here: what failed, what fixed it, timings observed)
+
+- **2026-10-27 (session 1).** S0–S5, S8a (magnitude 9 kept), S8 31/60, S9 f010/f100 + both `_psi1` sets imported.
+  - Timings: APTOS download ~69 MB/s (~3 min); S3 APTOS 20 s, IDRiD 7 s; S5 ~20 s. Classifier runs are GPU-bound (100 % util, ~99 W, CPU ~50 %): with 3 seed windows each run takes ~20–30 min (c1 runs longest, early stop near epoch 15), i.e. ~5–7 runs/hour overall, about half the speed assumed in S8. Peak memory ~16 GB for 3 windows.
+  - Kaggle now issues `KGAT_...` API tokens: save to `$HOME\.kaggle\access_token` (no JSON); the CLI picks it up.
+  - Shared PC: Windows Credential Manager may already hold another user's `git:https://github.com` login. The remote is set to `https://nabirakhan@github.com/nabirakhan/genai.git` so GCM stores and uses a separate per-user entry; `end_of_session.ps1`'s generic `cmdkey /delete:git:https://github.com` would remove the other user's entry, so session 1 ended with the steps run by hand (commit, push, Kaggle token removal) instead of the script.
+  - From Git Bash, `robocopy` needs `MSYS_NO_PATHCONV=1` or its `/E`-style switches are rewritten as paths (exit 16).
