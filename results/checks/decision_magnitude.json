@@ -1,0 +1,139 @@
+{
+ "check": "magnitude",
+ "rule": "the variant is adopted only if, at BOTH fractions (10% and 100%), its mean val macro-F1 over the 3 seeds exceeds the baseline mean by more than the baseline's seed standard deviation (ddof=1), AND its mean val rare-grade recall ((recall_3 + recall_4)/2) is not lower than the baseline's. Otherwise keep the baseline.",
+ "decided_at": "2026-10-27T06:25:24+00:00",
+ "setting": "ra_magnitude",
+ "baseline": 9,
+ "variant": 15,
+ "variant_adopted": false,
+ "applied": true,
+ "per_fraction": [
+  {
+   "fraction": 0.1,
+   "baseline_f1": 0.46465174520981584,
+   "baseline_f1_sd": 0.03280716446156142,
+   "variant_f1": 0.4585187272271803,
+   "delta_f1": -0.006133017982635547,
+   "f1_ok": false,
+   "baseline_rare_recall": 0.02376068376068376,
+   "variant_rare_recall": 0.01094017094017094,
+   "recall_ok": false,
+   "passed": false
+  },
+  {
+   "fraction": 1.0,
+   "baseline_f1": 0.6460778654675247,
+   "baseline_f1_sd": 0.029406131514525227,
+   "variant_f1": 0.6227033369684748,
+   "delta_f1": -0.023374528499049863,
+   "f1_ok": false,
+   "baseline_rare_recall": 0.41316239316239317,
+   "variant_rare_recall": 0.3345299145299145,
+   "recall_ok": false,
+   "passed": false
+  }
+ ],
+ "runs": [
+  {
+   "arm": "baseline",
+   "run_id": "c5_f010_r0_s1",
+   "fraction": 0.1,
+   "seed": 1,
+   "val_macro_f1": 0.4302782511697084,
+   "val_rare_recall": 0.0
+  },
+  {
+   "arm": "baseline",
+   "run_id": "c5_f010_r0_s0",
+   "fraction": 0.1,
+   "seed": 0,
+   "val_macro_f1": 0.4680487416659919,
+   "val_rare_recall": 0.02
+  },
+  {
+   "arm": "baseline",
+   "run_id": "c5_f010_r0_s2",
+   "fraction": 0.1,
+   "seed": 2,
+   "val_macro_f1": 0.4956282427937472,
+   "val_rare_recall": 0.05128205128205128
+  },
+  {
+   "arm": "baseline",
+   "run_id": "c5_f100_r0_s1",
+   "fraction": 1.0,
+   "seed": 1,
+   "val_macro_f1": 0.6660566619466737,
+   "val_rare_recall": 0.4035897435897436
+  },
+  {
+   "arm": "baseline",
+   "run_id": "c5_f100_r0_s0",
+   "fraction": 1.0,
+   "seed": 0,
+   "val_macro_f1": 0.6598656903434259,
+   "val_rare_recall": 0.48512820512820515
+  },
+  {
+   "arm": "baseline",
+   "run_id": "c5_f100_r0_s2",
+   "fraction": 1.0,
+   "seed": 2,
+   "val_macro_f1": 0.6123112441124745,
+   "val_rare_recall": 0.3507692307692308
+  },
+  {
+   "arm": "variant",
+   "run_id": "c5_f010_r0_s1_m15_val",
+   "fraction": 0.1,
+   "seed": 1,
+   "val_macro_f1": 0.43958618525953763,
+   "val_rare_recall": 0.0
+  },
+  {
+   "arm": "variant",
+   "run_id": "c5_f010_r0_s2_m15_val",
+   "fraction": 0.1,
+   "seed": 2,
+   "val_macro_f1": 0.4611637808585387,
+   "val_rare_recall": 0.0
+  },
+  {
+   "arm": "variant",
+   "run_id": "c5_f010_r0_s0_m15_val",
+   "fraction": 0.1,
+   "seed": 0,
+   "val_macro_f1": 0.47480621556346464,
+   "val_rare_recall": 0.03282051282051282
+  },
+  {
+   "arm": "variant",
+   "run_id": "c5_f100_r0_s1_m15_val",
+   "fraction": 1.0,
+   "seed": 1,
+   "val_macro_f1": 0.6532215391877723,
+   "val_rare_recall": 0.3964102564102564
+  },
+  {
+   "arm": "variant",
+   "run_id": "c5_f100_r0_s2_m15_val",
+   "fraction": 1.0,
+   "seed": 2,
+   "val_macro_f1": 0.6306815794951591,
+   "val_rare_recall": 0.3364102564102564
+  },
+  {
+   "arm": "variant",
+   "run_id": "c5_f100_r0_s0_m15_val",
+   "fraction": 1.0,
+   "seed": 0,
+   "val_macro_f1": 0.584206892222493,
+   "val_rare_recall": 0.27076923076923076
+  }
+ ],
+ "config": {
+  "ra_magnitude": 9,
+  "synth_variant": ""
+ },
+ "superseded": []
+}
