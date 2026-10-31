@@ -196,8 +196,7 @@ sh([sys.executable, "-m", "src.data.cache"])
 zips = sorted(glob.glob("/kaggle/input/**/synth_f*.zip", recursive=True))
 assert zips, "add the genai-gan-eval output as input"
 sh([sys.executable, "-m", "src.gan.import_synth", *zips])
-if not os.path.exists(RES):
-    shutil.copytree(f"{CODE}/results", RES)
+shutil.copytree(f"{CODE}/results", RES, dirs_exist_ok=True)   # src.genai.paths already created RES/preds etc.
 sh([sys.executable, "-m", "src.classify.queue", *QUEUE_ARGS, "--dry-run"])'''),
     ("code", '''procs = []
 for gpu, frac in FRACTION_PER_GPU.items():
