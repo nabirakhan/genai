@@ -33,13 +33,23 @@ foreach ($f in "kaggle.json", "access_token", "access_token.txt", "credentials.j
     if (Test-Path $p) { Remove-Item $p -Force; Write-Host "removed $p" }
 }
 Remove-Item Env:KAGGLE_API_TOKEN, Env:KAGGLE_KEY, Env:KAGGLE_USERNAME -ErrorAction SilentlyContinue
-# git push authenticates through Git Credential Manager (Windows Credential Manager), not gh. Feed git a
-# BOM-free file: a PowerShell 5.1 pipe prepends a BOM and git refuses it ("missing protocol field").
-$desc = Join-Path $env:TEMP "github-erase.txt"
-[System.IO.File]::WriteAllText($desc, "protocol=https`nhost=github.com`n`n")
-cmd /c "git credential reject < `"$desc`""
-Remove-Item $desc
-cmdkey /delete:git:https://github.com 2>$null | Out-Null
+# git push authenticates through Git Credential Manager (Windows Credential Manager), not gh. On the shared PC
+# origin carries the user name (https://<you>@github.com/...), so GCM keeps a per-user entry; erase only that
+# one, never the generic git:https://github.com entry (another user's login). Feed git a BOM-free file: a
+# PowerShell 5.1 pipe prepends a BOM and git refuses it ("missing protocol field").
+$url = git remote get-url origin
+if ($url -match '^https://([^@/:]+)@github\.com/') {
+    $u = $Matches[1]
+    $desc = Join-Path $env:TEMP "github-erase.txt"
+    [System.IO.File]::WriteAllText($desc, "protocol=https`nhost=github.com`nusername=$u`n`n")
+    cmd /c "git credential reject < `"$desc`""
+    Remove-Item $desc
+    cmdkey /delete:git:https://$u@github.com 2>$null | Out-Null
+    Write-Host "removed the GitHub credential of $u"
+} else {
+    $ok = $false
+    Write-Host "!! origin has no user name, so the GitHub login was left in Credential Manager (the generic entry may be another user's). Run: git remote set-url origin https://<you>@github.com/nabirakhan/genai.git, then delete your entry in Credential Manager by hand" -ForegroundColor Red
+}
 if (Get-Command gh -ErrorAction SilentlyContinue) { gh auth logout --hostname github.com 2>$null }
 if (Test-Path Env:HF_TOKEN) { Remove-Item Env:HF_TOKEN }
 foreach ($f in "token", "stored_tokens") { Remove-Item (Join-Path $HOME ".cache\huggingface\$f") -Force -ErrorAction SilentlyContinue }

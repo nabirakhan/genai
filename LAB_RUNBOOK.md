@@ -36,6 +36,7 @@ winget install --id astral-sh.uv -e --silent
 # reopen the terminal so PATH updates
 cd C:\genai
 git config user.name "Nabira Khan"; git config user.email "nabirakhan.official@gmail.com"   # repo-local, not --global (shared PC)
+git remote set-url origin https://nabirakhan@github.com/nabirakhan/genai.git   # per-user Credential Manager entry; other users' github.com logins stay untouched
 uv venv .venv --python 3.11
 .venv\Scripts\activate
 uv pip install -r requirements-lab.txt          # torch + torchvision, CUDA 12.8 wheels
@@ -50,7 +51,7 @@ Optional speed-up for the data stage: nothing; `prepare_images` uses all cores.
 ## S1 Download APTOS (~15 min, 9.5 GB)
 
 1. On kaggle.com (your account): open the APTOS 2019 competition page and accept the rules once.
-2. Account → API → *Create new token* → save `kaggle.json` to `C:\Users\<you>\.kaggle\kaggle.json`. **Delete it at session end** (shared PC).
+2. Account → API → *Create new token*. Kaggle now issues a `KGAT_...` token: save it as plain text to `C:\Users\<you>\.kaggle\access_token` (an older `kaggle.json` also works). **Deleted at session end** by `scripts\end_of_session.ps1` (shared PC).
 3. `python -m src.data.download_aptos`
 
 Expected output ends with `APTOS extracted and verified.` (3,662 PNGs; counts 1805/370/999/193/295). Then back up the zip: `Copy-Item C:\genai-data\raw\aptos\aptos2019-blindness-detection.zip F:\genai-backup\`.
@@ -105,18 +106,18 @@ Parallel windows: split the 12 runs by `--seed` as in S8 and apply after all win
 
 Expected: the 6 baseline runs are ordinary S8 runs (2 rows each in `results/classifier_runs.csv`); the 6 `*_m15_val` runs write one `dataset=val` row each to `results/checks/classifier_runs.csv` and are never scored on APTOS test or IDRiD. The queue prints no test/IDRiD metrics: until the decision is committed, do not open `results/classifier_runs.csv` or `results/preds/` and do not run `src.analysis.aggregate`. `checks` changes nothing while any of the 12 runs is missing (it lists them; rerun the queue). If 15 wins, `--apply` sets `ra_magnitude` 15 in `src/classify/config.json` and moves the 6 baseline runs to `results/checks/superseded_runs.csv` (+ `preds_superseded/`), so S8 re-runs them at 15 under the same ids; if 9 stays, only the decision is recorded. Then run S8 in full.
 
-## S8 Classifier runs, conditions 1–5 (60 runs, ~4 h total, resumable, after S8a)
+## S8 Classifier runs, conditions 1–5 (60 runs, ~9–12 h total, resumable, after S8a)
 
 ```powershell
 python -m src.classify.queue --dry-run      # lists pending runs (84 total; all wait for S8a, condition 6 also for S10a and synthetic images)
 python -m src.classify.queue                # runs them; Ctrl+C stops after the current run
 ```
 
-Expected: ~3–5 min per run on the RTX 4000 Ada; each run appends 2 rows (aptos_test, idrid) to `results/classifier_runs.csv` and a predictions file to `results/preds/`. Re-running the queue skips finished runs. If a run crashes (OOM, etc.) the queue continues; rerun the queue later. Watch the first run's epoch log: val QWK should climb above 0.8 within ~5 epochs at 100%.
+Expected (measured 27 Oct): three seed windows keep the GPU at 100 % and finish ~5–7 runs/hour together (each run 20–30 min; condition 1 runs longest, early stop near epoch 15), ~16 GB peak; each run appends 2 rows (aptos_test, idrid) to `results/classifier_runs.csv` and a predictions file to `results/preds/`. Re-running the queue skips finished runs. If a run crashes (OOM, etc.) the queue continues; rerun the queue later. Watch the first run's epoch log: val QWK should climb above 0.8 within ~5 epochs at 100%.
 
 Checks after a few runs: `python -m src.analysis.aggregate` prints the macro-F1 table so far.
 
-**Faster: up to three queue windows at once.** One run rarely keeps the GPU busy (augmentation runs on the CPU workers): measured on a Kaggle T4 (25 Oct, `genai-gpu-smoke`), a training step at batch 64 fp16 takes 164 ms, i.e. ~6 s of GPU per epoch, with 3.9 GB peak memory, so three runs fit in 20 GB. During the first run check `nvidia-smi`: if GPU-Util stays well below ~80%, run the queue in three PowerShell windows (venv active and `$env:GENAI_DATA` set in each), split by seed so that no run is in two windows:
+**Three queue windows at once** (used on 27 Oct). The lab GPU is the bottleneck (100 % busy with three windows, ~16 GB), so extra windows add little throughput but keep the GPU fed between runs; on a Kaggle T4 one training step at batch 64 fp16 takes 164 ms with 3.9 GB peak. Run the queue in three PowerShell windows (venv active and `$env:GENAI_DATA` set in each), split by seed so that no run is in two windows:
 
 ```powershell
 python -m src.classify.queue --seed 0 --workers 4    # window 1; windows 2 and 3: --seed 1, --seed 2
@@ -216,7 +217,7 @@ Remove-Item Env:HF_TOKEN
 # 1. let the current classifier run finish its epoch (Ctrl+C in the queue window waits for the run to end)
 scripts\end_of_session.ps1      # commits splits/ results/ web/public/results, pushes, removes kaggle.json, gh auth logout
 ```
-Check `git status` is clean, `Get-ChildItem $HOME\.kaggle` shows no `kaggle.json` / `access_token` / `credentials.json`, and `cmdkey /list:git:https://github.com` lists nothing before leaving.
+Check `git status` is clean, `Get-ChildItem $HOME\.kaggle` shows no `kaggle.json` / `access_token` / `credentials.json`, and `cmdkey /list:git:https://nabirakhan@github.com` lists nothing before leaving (the script erases only that per-user entry; leave other users' `git:https://github.com` logins alone).
 
 ## Optional: GAN training on the lab PC
 
