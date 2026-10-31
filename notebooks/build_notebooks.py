@@ -159,6 +159,65 @@ print(sorted(os.listdir(WORK)))'''),
 ]
 
 
+CLASSIFY_CELLS = [
+    ("markdown", """# Classifier runs on Kaggle (T4 x2): the lab-PC queue, one queue per GPU
+
+For weeks without lab time (LAB_RUNBOOK "Fallbacks"). Inputs: the **APTOS 2019 competition**, the **genai-lab-transfer**
+dataset (the lab PC's 256 px IDRiD crops) and the **genai-gan-eval output** (synthetic sets). The APTOS crops and both
+caches are rebuilt here with the repo's code; `src.data.split` verifies the committed split. `results/` starts as the
+repo's, so finished runs are skipped. Settings: GPU T4 x2, Internet on.
+
+Sessions (commit the downloaded `results_out.zip` into the repo between them):
+- A: `QUEUE_ARGS = ["--checks", "psi"]` finishes the pre-registered psi check; decide on the laptop with
+  `python -m src.analysis.checks psi --apply`, commit, push.
+- B: `QUEUE_ARGS = []` runs condition 6 at 10%/100% (the ratio sweep).
+- C (after the second eval run imports f025/f050): `QUEUE_ARGS = []`, `FRACTION_PER_GPU = {0: "0.25", 1: "0.5"}`."""),
+    ("code", f'''REPO = "{REPO_URL}"
+QUEUE_ARGS = ["--checks", "psi"]          # A; B and C: []
+FRACTION_PER_GPU = {{0: "0.1", 1: "1.0"}}   # one queue per T4; C: {{0: "0.25", 1: "0.5"}}
+WORKERS = 2'''),
+    ("code", SETUP.replace('"ninja",\n                "psutil", "scipy"', '"timm", "imagehash", "filelock", "scipy"')
+                  .replace('for opt in ("pyspng", "imageio-ffmpeg"):', 'for opt in ():')),
+    ("code", '''DATA, RES, CKPT = f"{WORK}/data", f"{WORK}/results", f"{WORK}/checkpoints"
+os.environ.update(GENAI_DATA=DATA, GENAI_RESULTS=RES, GENAI_CHECKPOINTS=CKPT)
+os.makedirs(f"{DATA}/raw/aptos", exist_ok=True)
+aptos = [os.path.dirname(p) for p in glob.glob("/kaggle/input/**/train.csv", recursive=True)
+         if os.path.isdir(os.path.join(os.path.dirname(p), "train_images"))]
+assert aptos, "add the APTOS 2019 competition as input"
+if not os.path.exists(f"{DATA}/raw/aptos/train_images"):
+    os.symlink(f"{aptos[0]}/train_images", f"{DATA}/raw/aptos/train_images")
+shutil.copy(f"{aptos[0]}/train.csv", f"{DATA}/raw/aptos/train.csv")
+idrid = glob.glob("/kaggle/input/**/idrid256", recursive=True)
+assert idrid, "add the genai-lab-transfer dataset (the lab PC's IDRiD crops) as input"
+shutil.copytree(idrid[0], f"{DATA}/idrid256", dirs_exist_ok=True)
+sh([sys.executable, "-m", "src.data.prepare_images", "--source", "aptos"])
+sh([sys.executable, "-m", "src.data.split"])       # verifies the committed split and joins grades from train.csv
+sh([sys.executable, "-m", "src.data.cache"])
+zips = sorted(glob.glob("/kaggle/input/**/synth_f*.zip", recursive=True))
+assert zips, "add the genai-gan-eval output as input"
+sh([sys.executable, "-m", "src.gan.import_synth", *zips])
+if not os.path.exists(RES):
+    shutil.copytree(f"{CODE}/results", RES)
+sh([sys.executable, "-m", "src.classify.queue", *QUEUE_ARGS, "--dry-run"])'''),
+    ("code", '''procs = []
+for gpu, frac in FRACTION_PER_GPU.items():
+    log = f"{WORK}/queue_gpu{gpu}.log"
+    cmd = [sys.executable, "-m", "src.classify.queue", *QUEUE_ARGS, "--fraction", frac, "--workers", str(WORKERS)]
+    print("$", " ".join(cmd), ">", log)
+    procs.append((log, subprocess.Popen(cmd, env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu)},
+                                        stdout=open(log, "w"), stderr=subprocess.STDOUT)))
+for log, p in procs:
+    p.wait()
+    print(f"== {log}: exit {p.returncode}")
+    print(open(log).read()[-4000:])'''),
+    ("code", '''shutil.make_archive(f"{WORK}/results_out", "zip", RES)
+os.chdir(WORK)
+for d in (DATA, CKPT, CODE):
+    shutil.rmtree(d, ignore_errors=True)
+print(sorted(os.listdir(WORK)))'''),
+]
+
+
 PREP_CELLS = [
     ("markdown", """# Data prep on Kaggle (CPU): splits + stylegan3 zips from the APTOS competition data
 
@@ -261,4 +320,5 @@ if __name__ == "__main__":
     (HERE / "kaggle_dedup_audit.ipynb").write_text(json.dumps(nb(AUDIT_CELLS), indent=1), encoding="utf-8")
     (HERE / "kaggle_gan_train.ipynb").write_text(json.dumps(nb(TRAIN_CELLS), indent=1), encoding="utf-8")
     (HERE / "kaggle_gan_eval.ipynb").write_text(json.dumps(nb(EVAL_CELLS), indent=1), encoding="utf-8")
-    print("wrote kaggle_data_prep.ipynb, kaggle_gan_train.ipynb, kaggle_gan_eval.ipynb")
+    (HERE / "kaggle_classify.ipynb").write_text(json.dumps(nb(CLASSIFY_CELLS), indent=1), encoding="utf-8")
+    print("wrote kaggle_data_prep.ipynb, kaggle_gan_train.ipynb, kaggle_gan_eval.ipynb, kaggle_classify.ipynb")
